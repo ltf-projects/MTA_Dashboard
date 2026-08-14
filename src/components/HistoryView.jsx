@@ -47,8 +47,14 @@ function validateRange(fromStr, toStr, nowMs) {
   return { fromMs, toMs };
 }
 
-// Grafiğe çizilebilecek alanlar: tanımlı her sayısal alan.
-const CHARTABLE = FIELDS.filter((f) => f.key);
+// Geçmiş yalnızca bu kategoriler için çizilir; her biri kendi grafiğini alır.
+// Dijital alanlar açık/kapalı durum taşıdığı için zaman serisinde anlamlı
+// değil, o yüzden dışarıda bırakıldı.
+const CHART_CATEGORIES = ['makine', 'motor'];
+
+// Grafiğe çizilebilecek alanlar: yukarıdaki kategorilerin sayısal alanları.
+// Köprüden yalnızca bunlar istenir.
+const CHARTABLE = FIELDS.filter((f) => f.key && CHART_CATEGORIES.includes(f.category));
 
 // Seri renkleri. Bölge renklerinden (yeşil/sarı/kırmızı) ayrı tutulur, çünkü
 // burada renk "durum" değil "hangi alan" demektir. İki temada da okunur.
@@ -169,7 +175,7 @@ export default function HistoryView() {
   // kümenin yalnızca kendi alanlarına düşen kısmını çizer.
   const groups = useMemo(
     () =>
-      CATEGORIES.map((c) => {
+      CATEGORIES.filter((c) => CHART_CATEGORIES.includes(c.id)).map((c) => {
         const fields = CHARTABLE.filter((f) => f.category === c.id);
         return {
           ...c,
