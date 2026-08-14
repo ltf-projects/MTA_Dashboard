@@ -193,9 +193,16 @@ function recordSample(value, atMs) {
   );
 }
 
+// Barındırma sağlayıcısı çalışan sürümün commit'ini ortam değişkeniyle verir.
+// /health bunu yansıtır: "deploy gerçekten yeni kodu mu aldı" sorusu böylece
+// tahminle değil bakarak yanıtlanır. Yerelde tanımsızdır.
+const commitSha = (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || null;
+
 app.get('/health', (_req, res) =>
   res.json({
     ...lastState.connection,
+    commit: commitSha,
+    fieldCount: FIELD_KEYS.length,
     history: {
       enabled: historyEnabled,
       ready: dbReady,
