@@ -98,8 +98,11 @@ export default function Gauge({
           : undefined
       }
     >
+      {/* Büyük harfe CSS ile değil burada çevrilir: text-transform Türkçe
+          kuralını (i → İ) her tarayıcıda uygulamıyor, "SERVIS" gibi yanlış
+          sonuç verebiliyordu. */}
       <span className="gauge-label" title={label}>
-        {label}
+        {label.toLocaleUpperCase('tr-TR')}
       </span>
 
       <svg
