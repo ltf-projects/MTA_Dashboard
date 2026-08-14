@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MTA Dashboard · Canlı İzleme</title>
+    <script>
+      // Kayıtlı görünüm modunu sayfa boyanmadan önce uygula (açılışta renk
+      // titremesini önler). Mod listesi ve varsayılan src/config/themes.js ile
+      // aynı kalmalı; tanınmayan bir kayıt varsayılana düşer.
+      try {
+        var m = localStorage.getItem('mta-theme');
+        if (['system', 'dark', 'light'].indexOf(m) === -1) m = 'dark';
+        var light = m === 'light' ||
+          (m === 'system' &&
+            window.matchMedia &&
+            window.matchMedia('(prefers-color-scheme: light)').matches);
+        document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
