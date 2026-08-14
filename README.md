@@ -32,6 +32,58 @@ npm run dev
 
 Yalnızca birini çalıştırmak için `npm run server` / `npm run ui`.
 
+## Canlıya alma
+
+İki parça ayrı yerlerde barındırılır:
+
+| Parça | Nerede | Neden |
+| --- | --- | --- |
+| Köprü (`server.js`) | **Railway** | MQTT ve WebSocket bağlantısını sürekli açık tutması gerekir; serverless ortamlarda çalışmaz |
+| Arayüz (`dist/`) | **Vercel** | Derlenmiş statik dosyalar, CDN'den dağıtılır |
+
+Yapılandırma dosyaları depoda hazırdır: [`railway.json`](railway.json) köprüyü
+`node server.js` ile başlatır ve `/health` ucundan sağlık kontrolü yapar;
+[`vercel.json`](vercel.json) arayüzü `vite build` ile derleyip `dist/` klasörünü
+yayınlar.
+
+### 1. Köprü — Railway
+
+Railway panelinde depodan yeni bir servis oluşturulur ve **Variables** sekmesine
+şu değişkenler girilir (değerler yerel `.env` dosyasındakilerle aynıdır):
+
+```
+MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD,
+MQTT_TLS, MQTT_REJECT_UNAUTHORIZED, MQTT_TOPIC, BOX_ID,
+DATABASE_URL, DATABASE_SSL, HISTORY_SAMPLE_MS,
+ALLOWED_ORIGIN
+```
+
+`PORT` değişkenini Railway kendisi enjekte eder, elle girilmez. `ALLOWED_ORIGIN`
+arayüzün adresidir (2. adımdan sonra netleşir); virgülle birden fazla adres
+verilebilir. Servise **Settings → Networking → Generate Domain** ile genel bir
+adres verilir; `https://<ad>.up.railway.app/health` çağrısı `connected: true`
+ve `history.ready: true` dönüyorsa köprü ayaktadır.
+
+### 2. Arayüz — Vercel
+
+Aynı depo Vercel'e bağlanır; framework `vite` olarak algılanır. Tek bir ortam
+değişkeni gerekir:
+
+```
+VITE_BRIDGE_URL=https://<ad>.up.railway.app
+```
+
+Bu değer **derleme anında** pakete gömülür — sonradan değiştirilirse yeniden
+deploy almak gerekir. Tanımlanmazsa arayüz `localhost:4001` adresine bağlanmaya
+çalışır ve tarayıcı konsoluna bunu açıkça yazar.
+
+### 3. İki adresi birbirine tanıtma
+
+Vercel adresi belli olunca Railway'deki `ALLOWED_ORIGIN` değişkeni o adrese
+çekilir (örn. `https://mta-dashboard.vercel.app`). Vercel'in her dalda ürettiği
+**önizleme adresleri farklıdır**; önizlemelerin de veri görmesi isteniyorsa o
+adresler `ALLOWED_ORIGIN`'e virgülle eklenir.
+
 ## Sekmeler
 
 | Sekme | İçerik |

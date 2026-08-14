@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "MTA Dashboard - Hoytek-IOT MQTT canlı sondaj makinesi izleme arayüzü (React + Node köprü)",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "concurrently -n \"KOPRU,ARAYUZ\" -c \"yellow,red\" \"node server.js\" \"vite\"",
     "server": "node server.js",
