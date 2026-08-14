@@ -44,14 +44,12 @@ const {
   // "Geçmiş Grafik" sekmesi: örnekler PostgreSQL'e yazılır.
   // Paketler saniyede birkaç kez gelebiliyor; grafik için bu çözünürlük
   // gereksiz, o yüzden en fazla HISTORY_SAMPLE_MS'de bir satır yazılır.
-  HISTORY_SAMPLE_MS = '5000',
+  HISTORY_SAMPLE_MS = '10000',
   // postgres://kullanici:sifre@sunucu:5432/veritabani
   // Tanımlı değilse geçmiş kaydı kapalıdır; canlı izleme normal çalışır.
   DATABASE_URL = '',
   // Barındırılan Postgres'lerin çoğu TLS ister (Neon, Supabase, Railway...).
   DATABASE_SSL = 'false',
-  // 0 = sınırsız. Pozitifse bu günden eski satırlar günde bir SİLİNİR.
-  HISTORY_RETENTION_DAYS = '0',
 } = process.env;
 
 const listenPort = Number(PORT || BRIDGE_PORT);
@@ -95,8 +93,7 @@ const lastState = {
 //
 // DATABASE_URL tanımlı değilse geçmiş kaydı sessizce kapanır — canlı izleme
 // (MQTT -> Socket.IO) veritabanından bağımsız çalışmaya devam eder.
-const historySampleMs = Math.max(Number(HISTORY_SAMPLE_MS) || 5000, 250);
-const retentionDays = Math.max(Number(HISTORY_RETENTION_DAYS) || 0, 0);
+const historySampleMs = Math.max(Number(HISTORY_SAMPLE_MS) || 10000, 250);
 
 const TABLE = 'sondaj_ornekleri';
 const FIELD_KEYS = [...new Set(FIELDS.filter((f) => f.key).map((f) => f.key))];
@@ -158,7 +155,6 @@ async function initDb() {
     dbReady = true;
     dbError = null;
     console.log(`[KÖPRÜ] Veritabanı hazır: ${TABLE} (${FIELD_KEYS.length} alan sütunu)`);
-    await cleanupOldRows();
   } catch (e) {
     dbError = e.message;
     console.error('[KÖPRÜ] Veritabanı hazırlanamadı:', e.message);
@@ -166,21 +162,7 @@ async function initDb() {
   }
 }
 
-// Saklama süresi dolmuş satırları siler. HISTORY_RETENTION_DAYS=0 ise kapalı.
-async function cleanupOldRows() {
-  if (!dbReady || retentionDays <= 0) return;
-  try {
-    const r = await pool.query(
-      `DELETE FROM ${TABLE} WHERE zaman < now() - ($1 || ' days')::interval`,
-      [String(retentionDays)]
-    );
-    if (r.rowCount) {
-      console.log(`[KÖPRÜ] ${r.rowCount} eski satır silindi (>${retentionDays} gün).`);
-    }
-  } catch (e) {
-    console.error('[KÖPRÜ] Eski kayıt temizliği başarısız:', e.message);
-  }
-}
+// Kayıtlar süresiz saklanır; otomatik silme/temizleme yoktur.
 
 const INSERT_SQL = `
   INSERT INTO ${TABLE} (zaman, box_id, ${FIELD_KEYS.map(q).join(', ')})
@@ -209,10 +191,6 @@ function recordSample(value, atMs) {
       console.error('[KÖPRÜ] Örnek yazılamadı:', e.message);
     }
   );
-}
-
-if (retentionDays > 0) {
-  setInterval(cleanupOldRows, 24 * 60 * 60 * 1000).unref();
 }
 
 app.get('/health', (_req, res) =>

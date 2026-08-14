@@ -44,7 +44,7 @@ Yalnızca birini çalıştırmak için `npm run server` / `npm run ui`.
 
 ## Geçmiş Grafik
 
-Köprü, gelen paketlerden en fazla `HISTORY_SAMPLE_MS` (varsayılan 5 sn) aralıkla
+Köprü, gelen paketlerden en fazla `HISTORY_SAMPLE_MS` (varsayılan 10 sn) aralıkla
 örnek alıp **PostgreSQL**'e yazar. Arayüz bu geçmişi
 `GET /history?from=&to=&keys=&points=` ucundan çeker; sonuç grafik için ~1200
 noktaya seyreltilir ve veri akışının kesildiği aralıklarda çizgi kopar.
@@ -78,8 +78,7 @@ Socket.IO) veritabanından bağımsız çalışmaya devam eder ve Geçmiş Grafi
 durumu açıkça bildirir. Veritabanı sonradan erişilemez hale gelirse de köprü
 çökmez, yalnızca geçmiş kaydı durur.
 
-`HISTORY_RETENTION_DAYS` varsayılan olarak `0`'dır (sınırsız saklama). Pozitif
-bir değer verilirse o günden eski satırlar günde bir **silinir**.
+Kayıtlar **süresiz** saklanır: köprü hiçbir zaman eski satırları silmez.
 
 ## Veri kesintisi
 

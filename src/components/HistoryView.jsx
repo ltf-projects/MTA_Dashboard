@@ -403,7 +403,7 @@ function Chart({ samples, series, fromMs, toMs, sampleMs }) {
 
   // Her seri için { color, label, segments: [[{t,v}...]] }
   const lines = useMemo(() => {
-    const gapMs = Math.max((sampleMs || 5000) * 3, 30000);
+    const gapMs = Math.max((sampleMs || 10000) * 3, 30000);
     return series.map((s) => {
       const pts = samples
         .map((row) => ({ t: Date.parse(row.t), v: Number(row[s.key]) }))
