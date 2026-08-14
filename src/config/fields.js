@@ -45,6 +45,9 @@ const MACHINE_FIELDS = [
   { key: 'AnalogData9', tr: 'Vireline Vinç', min: 0, max: 320, zones: zones(230, 242, 320) },
   { key: 'AnalogData10', tr: 'Çamur Su Basıncı', min: 0, max: 320, zones: zones(225, 250, 320) },
   { key: 'AnalogData11', tr: 'Rotasyon İlerleme', min: 0, max: 350, zones: zones(330, 342, 350) },
+  // Ölçek ve eşikler henüz bilinmiyor: aralık 0–100 varsayıldı ve tek bir
+  // "normal" bant verildi ki gösterge uydurma Uyarı/Tehlike rengi göstermesin.
+  { key: 'AnalogData12', tr: 'Su Litre', min: 0, max: 100, zones: [{ to: 100, level: 'normal' }] },
   { key: 'AnalogData13', tr: 'Makine Roll', min: -90, max: 90, zones: zones(55, 70, 90) },
   { key: 'AnalogData14', tr: 'Makine Pitch', min: -90, max: 90, zones: zones(55, 70, 90) },
   { key: 'AnalogData15', tr: 'Kule Roll', min: -90, max: 90, zones: zones(55, 70, 90) },
