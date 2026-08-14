@@ -42,12 +42,11 @@ const MACHINE_FIELDS = [
   { key: 'AnalogData6', tr: 'Askı Basıncı', min: 0, max: 50, zones: zones(20, 27, 50), tickDecimals: 1 },
   { key: 'AnalogData7', tr: 'Wireline Winç', min: 0, max: 320, zones: zones(240, 275, 320) },
   { key: 'AnalogData8', tr: 'Ana Vinç', min: 0, max: 320, zones: zones(240, 275, 320) },
-  { key: 'AnalogData9', tr: 'Vireline Vinç', min: 0, max: 320, zones: zones(230, 242, 320) },
+  { key: 'AnalogData9', tr: 'Wireline Vinç', min: 0, max: 320, zones: zones(230, 242, 320) },
   { key: 'AnalogData10', tr: 'Çamur Su Basıncı', min: 0, max: 320, zones: zones(225, 250, 320) },
   { key: 'AnalogData11', tr: 'Rotasyon İlerleme', min: 0, max: 350, zones: zones(330, 342, 350) },
-  // Ölçek ve eşikler henüz bilinmiyor: aralık 0–100 varsayıldı ve tek bir
-  // "normal" bant verildi ki gösterge uydurma Uyarı/Tehlike rengi göstermesin.
-  { key: 'AnalogData12', tr: 'Su Litre', min: 0, max: 100, zones: [{ to: 100, level: 'normal' }] },
+  // Eşikler henüz teyit edilmedi; diğer göstergelerle aynı orana göre kondu.
+  { key: 'AnalogData12', tr: 'Su Litre', min: 0, max: 15000, zones: zones(11250, 12750, 15000) },
   { key: 'AnalogData13', tr: 'Makine Roll', min: -90, max: 90, zones: zones(55, 70, 90) },
   { key: 'AnalogData14', tr: 'Makine Pitch', min: -90, max: 90, zones: zones(55, 70, 90) },
   { key: 'AnalogData15', tr: 'Kule Roll', min: -90, max: 90, zones: zones(55, 70, 90) },
@@ -87,7 +86,7 @@ const MOTOR_GAUGES = [
   { key: 'CAN_Engine_Speed', tr: 'Motor Devri', unit: '', min: 0, max: 2600, zones: zones(2350, 2500, 2600) },
   { key: 'CAN_Engine_Oil_Pressure', tr: 'Motor Yağ Basıncı', unit: 'BAR', min: 0, max: 100, zones: zones(70, 85, 100) },
   { key: 'CAN_Engine_Coolant_Temperature', tr: 'Motor Hararet', unit: '°C', min: 0, max: 150, zones: zones(105, 125, 150) },
-  { key: 'CAN_Engine_Oil_Temperature', tr: 'Motor Yağ Sıcaklığı', unit: '°C', min: 0, max: 150, zones: zones(105, 125, 150) },
+  { key: 'CAN_Engine_Oil_Temperature', tr: 'Motor Yağ Basıncı', unit: '°C', min: 0, max: 150, zones: zones(105, 125, 150) },
   { key: 'CAN_Fuel_Level_1', tr: 'Yakıt Seviyesi 1', unit: '%', min: 0, max: 100, zones: zones(70, 85, 100) },
   { key: 'CAN_Fuel_Level_2', tr: 'Yakıt Seviyesi 2', unit: '%', min: 0, max: 100, zones: zones(70, 85, 100) },
   { key: 'CAN_Engine_Fuel_Temperature', tr: 'Mazot Sıcaklığı', unit: '°C', min: 0, max: 220, zones: zones(200, 212, 220) },

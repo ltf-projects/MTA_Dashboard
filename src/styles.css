@@ -628,6 +628,9 @@ body {
   font-weight: 600;
   color: var(--text-dim);
   text-align: center;
+  /* Büyük harfe çevirme burada yapılır; sayfa lang="tr" olduğu için
+     tarayıcı Türkçe kuralını uygular (i → İ, ör. "SERVİS POMPASI"). */
+  text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
