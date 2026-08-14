@@ -164,17 +164,41 @@ export default function HistoryView() {
     return seen;
   }, [result]);
 
-  const series = useMemo(
+  // Her kategori kendi grafiğini çizer. Bir alan yalnızca tek bir kategoriye
+  // ait olduğu için tek bir `active` kümesi hepsine yetiyor: her grafik
+  // kümenin yalnızca kendi alanlarına düşen kısmını çizer.
+  const groups = useMemo(
     () =>
-      CHARTABLE.filter((f) => active.has(f.key)).map((f) => ({
-        key: f.key,
-        label: f.tr,
-        unit: f.unit,
-        decimals: f.decimals ?? 2,
-        color: COLOR_OF.get(f.key),
-      })),
+      CATEGORIES.map((c) => {
+        const fields = CHARTABLE.filter((f) => f.category === c.id);
+        return {
+          ...c,
+          fields,
+          series: fields
+            .filter((f) => active.has(f.key))
+            .map((f) => ({
+              key: f.key,
+              label: f.tr,
+              unit: f.unit,
+              decimals: f.decimals ?? 2,
+              color: COLOR_OF.get(f.key),
+            })),
+        };
+      }).filter((g) => g.fields.length > 0),
     [active]
   );
+
+  // Bir kategorinin tüm alanlarını birlikte açar/kapatır. Açarken bu aralıkta
+  // verisi olmayan alanlar atlanır — çipleri zaten devre dışı.
+  const setGroup = (fields, on) =>
+    setActive((prev) => {
+      const next = new Set(prev);
+      for (const f of fields) {
+        if (!on) next.delete(f.key);
+        else if (withData.has(f.key)) next.add(f.key);
+      }
+      return next;
+    });
 
   return (
     <section className="history">
@@ -248,82 +272,79 @@ export default function HistoryView() {
             </p>
           )}
 
-          <div className="chart-card">
-            <Chart
-              samples={result.samples}
-              series={series}
-              fromMs={result.fromMs}
-              toMs={result.toMs}
-              sampleMs={result.sampleMs}
-            />
+          {groups.map((g) => (
+            <div className="chart-card" key={g.id}>
+              <h3 className="chart-card-title">{g.title}</h3>
 
-            <CategoryPicker
-              active={active}
-              withData={withData}
-              onToggle={toggle}
-              onAll={() => setActive(new Set(CHARTABLE.filter((f) => withData.has(f.key)).map((f) => f.key)))}
-              onNone={() => setActive(new Set())}
-            />
-          </div>
+              <Chart
+                samples={result.samples}
+                series={g.series}
+                fromMs={result.fromMs}
+                toMs={result.toMs}
+                sampleMs={result.sampleMs}
+              />
+
+              <FieldPicker
+                fields={g.fields}
+                active={active}
+                withData={withData}
+                onToggle={toggle}
+                onAll={() => setGroup(g.fields, true)}
+                onNone={() => setGroup(g.fields, false)}
+              />
+            </div>
+          ))}
         </>
       )}
     </section>
   );
 }
 
-// --- Kategori seçici -------------------------------------------------------
-function CategoryPicker({ active, withData, onToggle, onAll, onNone }) {
-  const total = CHARTABLE.length;
+// --- Alan seçici (her grafiğin altında, yalnızca o kategorinin alanları) ----
+function FieldPicker({ fields, active, withData, onToggle, onAll, onNone }) {
+  const onCount = fields.filter((f) => active.has(f.key)).length;
+  const selectable = fields.filter((f) => withData.has(f.key)).length;
 
   return (
     <div className="cats">
       <div className="cats-head">
         <span className="cats-title">
-          Kategoriler — {active.size}/{total} açık
+          Alanlar — {onCount}/{fields.length} açık
         </span>
         <div className="cats-actions">
-          <button type="button" className="cats-btn" onClick={onAll} disabled={withData.size === 0}>
+          <button type="button" className="cats-btn" onClick={onAll} disabled={selectable === 0}>
             Tümünü aç
           </button>
-          <button type="button" className="cats-btn" onClick={onNone} disabled={active.size === 0}>
+          <button type="button" className="cats-btn" onClick={onNone} disabled={onCount === 0}>
             Tümünü kapat
           </button>
         </div>
       </div>
 
-      {CATEGORIES.map((c) => {
-        const fields = CHARTABLE.filter((f) => f.category === c.id);
-        if (fields.length === 0) return null;
-        return (
-          <div className="cats-group" key={c.id}>
-            <p className="cats-group-title">{c.title}</p>
-            <div className="cats-grid">
-              {fields.map((f) => {
-                const on = active.has(f.key);
-                const empty = !withData.has(f.key);
-                return (
-                  <button
-                    key={f.key}
-                    type="button"
-                    className={`cat-chip ${on ? 'is-on' : ''} ${empty ? 'is-empty' : ''}`}
-                    style={{ '--series': COLOR_OF.get(f.key) }}
-                    onClick={() => onToggle(f.key)}
-                    disabled={empty}
-                    aria-pressed={on}
-                    title={empty ? `${f.tr} — bu aralıkta veri yok` : f.tr}
-                  >
-                    <i className="cat-dot" aria-hidden="true" />
-                    <span className="cat-name">{f.tr}</span>
-                    <span className="cat-sign" aria-hidden="true">
-                      {on ? '×' : '+'}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
+      <div className="cats-grid">
+        {fields.map((f) => {
+          const on = active.has(f.key);
+          const empty = !withData.has(f.key);
+          return (
+            <button
+              key={f.key}
+              type="button"
+              className={`cat-chip ${on ? 'is-on' : ''} ${empty ? 'is-empty' : ''}`}
+              style={{ '--series': COLOR_OF.get(f.key) }}
+              onClick={() => onToggle(f.key)}
+              disabled={empty}
+              aria-pressed={on}
+              title={empty ? `${f.tr} — bu aralıkta veri yok` : f.tr}
+            >
+              <i className="cat-dot" aria-hidden="true" />
+              <span className="cat-name">{f.tr}</span>
+              <span className="cat-sign" aria-hidden="true">
+                {on ? '×' : '+'}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -618,7 +639,7 @@ function Chart({ samples, series, fromMs, toMs, sampleMs }) {
       </div>
 
       {series.length === 0 && (
-        <p className="chart-hint">Grafiğe eklemek için aşağıdaki kategorilerden veri seçin.</p>
+        <p className="chart-hint">Grafiğe eklemek için aşağıdan veri seçin.</p>
       )}
       {series.length > 0 && !hasData && (
         <p className="chart-hint">Seçilen veriler bu aralıkta kayıtlı değil.</p>
