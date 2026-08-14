@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS public.sondaj_ornekleri (
   "AnalogData9"                         DOUBLE PRECISION,
   "AnalogData10"                        DOUBLE PRECISION,
   "AnalogData11"                        DOUBLE PRECISION,
+  "AnalogData12"                        DOUBLE PRECISION,
   "AnalogData13"                        DOUBLE PRECISION,
   "AnalogData14"                        DOUBLE PRECISION,
   "AnalogData15"                        DOUBLE PRECISION,
