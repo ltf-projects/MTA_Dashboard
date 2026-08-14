@@ -1004,26 +1004,7 @@ body {
 }
 .cat-chip.is-on .cat-sign { color: var(--series); }
 
-.chart-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-}
-.chart-stat { display: flex; flex-direction: column; gap: 4px; }
-.chart-stat-label { font-size: 12px; font-weight: 600; color: var(--text-faint); }
-.chart-stat-value {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.chart-stat-unit { font-size: 12px; font-weight: 600; color: var(--text-faint); }
-
 @media (max-width: 700px) {
-  .chart-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .history-field, .history-field--grow { min-width: 100%; }
   .history-arrow { display: none; }
   .history-run { width: 100%; }

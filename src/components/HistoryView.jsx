@@ -446,9 +446,6 @@ function Chart({ samples, series, fromMs, toMs, sampleMs }) {
   const spanMs = toMs - fromMs;
   const { ticks: xTicks, step: xStep } = buildTimeTicks(fromMs, toMs, X_DIVISIONS);
 
-  const single = lines.length === 1 ? lines[0] : null;
-  const singleValues = single?.points.map((p) => p.v) ?? [];
-
   // Tooltip yalnızca imleç gerçek bir seri çizgisine yeterince yakınsa açılır.
   const onMove = (e) => {
     const svg = svgRef.current;
@@ -627,37 +624,7 @@ function Chart({ samples, series, fromMs, toMs, sampleMs }) {
         <p className="chart-hint">Seçilen veriler bu aralıkta kayıtlı değil.</p>
       )}
 
-      {single && singleValues.length > 0 && (
-        <div className="chart-stats">
-          <Stat label="En düşük" value={Math.min(...singleValues)} unit={single.unit} decimals={single.decimals} />
-          <Stat
-            label="Ortalama"
-            value={singleValues.reduce((a, b) => a + b, 0) / singleValues.length}
-            unit={single.unit}
-            decimals={single.decimals}
-          />
-          <Stat label="En yüksek" value={Math.max(...singleValues)} unit={single.unit} decimals={single.decimals} />
-          <Stat
-            label="Son"
-            value={singleValues[singleValues.length - 1]}
-            unit={single.unit}
-            decimals={single.decimals}
-          />
-        </div>
-      )}
     </>
-  );
-}
-
-function Stat({ label, value, unit, decimals }) {
-  return (
-    <div className="chart-stat">
-      <span className="chart-stat-label">{label}</span>
-      <span className="chart-stat-value">
-        {formatNum(value, decimals)}
-        {unit ? <span className="chart-stat-unit"> {unit}</span> : null}
-      </span>
-    </div>
   );
 }
 
