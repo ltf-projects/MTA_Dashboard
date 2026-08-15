@@ -44,7 +44,7 @@ const {
   // "Geçmiş Grafik" sekmesi: örnekler PostgreSQL'e yazılır.
   // Paketler saniyede birkaç kez gelebiliyor; grafik için bu çözünürlük
   // gereksiz, o yüzden en fazla HISTORY_SAMPLE_MS'de bir satır yazılır.
-  HISTORY_SAMPLE_MS = '10000',
+  HISTORY_SAMPLE_MS = '5000',
   // postgres://kullanici:sifre@sunucu:5432/veritabani
   // Tanımlı değilse geçmiş kaydı kapalıdır; canlı izleme normal çalışır.
   DATABASE_URL = '',
@@ -93,7 +93,7 @@ const lastState = {
 //
 // DATABASE_URL tanımlı değilse geçmiş kaydı sessizce kapanır — canlı izleme
 // (MQTT -> Socket.IO) veritabanından bağımsız çalışmaya devam eder.
-const historySampleMs = Math.max(Number(HISTORY_SAMPLE_MS) || 10000, 250);
+const historySampleMs = Math.max(Number(HISTORY_SAMPLE_MS) || 5000, 250);
 
 const TABLE = 'sondaj_ornekleri';
 const FIELD_KEYS = [...new Set(FIELDS.filter((f) => f.key).map((f) => f.key))];

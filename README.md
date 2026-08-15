@@ -96,7 +96,7 @@ adresler `ALLOWED_ORIGIN`'e virgülle eklenir.
 
 ## Geçmiş Grafik
 
-Köprü, gelen paketlerden en fazla `HISTORY_SAMPLE_MS` (varsayılan 10 sn) aralıkla
+Köprü, gelen paketlerden en fazla `HISTORY_SAMPLE_MS` (varsayılan 5 sn) aralıkla
 örnek alıp **PostgreSQL**'e yazar. Arayüz bu geçmişi
 `GET /history?from=&to=&keys=&points=` ucundan çeker; sonuç grafik için ~1200
 noktaya seyreltilir ve veri akışının kesildiği aralıklarda çizgi kopar.
