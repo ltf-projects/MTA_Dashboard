@@ -37,16 +37,16 @@ export const CATEGORIES = [
 // yazmaz; aşağıdaki map varsayılanı boş bırakır, alanın kendi `unit` değeri
 // varsa o kazanır.
 const MACHINE_FIELDS = [
-  { key: 'AnalogData1', tr: 'Ana Pompa Basıncı', unit: 'bar', min: 0, max: 340, zones: zones(255, 290, 340) },
-  { key: 'AnalogData2', tr: 'Servis Pompası', unit: 'bar', min: 0, max: 250, zones: zones(190, 215, 250) },
-  { key: 'AnalogData3', tr: 'Servis Pompa Basıncı', unit: 'bar', min: 0, max: 250, zones: zones(190, 212, 250) },
-  { key: 'AnalogData4', tr: 'Rotasyon Tork', unit: 'bar', min: 0, max: 270, zones: zones(205, 232, 270) },
-  { key: 'AnalogData5', tr: 'Baskı Basıncı', unit: 'bar', min: 0, max: 270, zones: zones(205, 232, 270) },
-  { key: 'AnalogData6', tr: 'Askı Basıncı', unit: 'bar', min: 0, max: 50, zones: zones(20, 27, 50), tickDecimals: 1 },
-  { key: 'AnalogData7', tr: 'Wireline Winç', unit: 'bar', min: 0, max: 320, zones: zones(240, 275, 320) },
-  { key: 'AnalogData8', tr: 'Ana Vinç', unit: 'bar', min: 0, max: 320, zones: zones(240, 275, 320) },
+  { key: 'AnalogData1', tr: 'Ana Pompa Basıncı', unit: 'BAR', min: 0, max: 340, zones: zones(255, 290, 340) },
+  { key: 'AnalogData2', tr: 'Servis Pompası', unit: 'BAR', min: 0, max: 250, zones: zones(190, 215, 250) },
+  { key: 'AnalogData3', tr: 'Servis Pompa Basıncı', unit: 'BAR', min: 0, max: 250, zones: zones(190, 212, 250) },
+  { key: 'AnalogData4', tr: 'Rotasyon Tork', unit: 'BAR', min: 0, max: 270, zones: zones(205, 232, 270) },
+  { key: 'AnalogData5', tr: 'Baskı Basıncı', unit: 'BAR', min: 0, max: 270, zones: zones(205, 232, 270) },
+  { key: 'AnalogData6', tr: 'Askı Basıncı', unit: 'BAR', min: 0, max: 50, zones: zones(20, 27, 50), tickDecimals: 1 },
+  { key: 'AnalogData7', tr: 'Wireline Winç', unit: 'BAR', min: 0, max: 320, zones: zones(240, 275, 320) },
+  { key: 'AnalogData8', tr: 'Ana Vinç', unit: 'BAR', min: 0, max: 320, zones: zones(240, 275, 320) },
   { key: 'AnalogData9', tr: 'Wireline Vinç', min: 0, max: 320, zones: zones(230, 242, 320) },
-  { key: 'AnalogData10', tr: 'Çamur Su Basıncı', min: 0, max: 320, zones: zones(225, 250, 320) },
+  { key: 'AnalogData10', tr: 'Çamur Su Basıncı', unit: 'BAR', min: 0, max: 320, zones: zones(225, 250, 320) },
   { key: 'AnalogData11', tr: 'Rotasyon İlerleme', min: 0, max: 350, zones: zones(330, 342, 350) },
   // Eşikler henüz teyit edilmedi; diğer göstergelerle aynı orana göre kondu.
   { key: 'AnalogData12', tr: 'Su Litre', unit: 'Litre', min: 0, max: 15000, zones: zones(11250, 12750, 15000) },
