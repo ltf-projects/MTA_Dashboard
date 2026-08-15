@@ -813,100 +813,138 @@ body {
   border-radius: 12px;
 }
 .chart-card + .chart-card { margin-top: 18px; }
+
+/* Başlık şeridi: simge + ad + görünümü sıfırla */
+.chart-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.chart-card-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
 .chart-card-title {
-  margin: 0 0 12px;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
   font-size: 15px;
   font-weight: 700;
   color: var(--text);
 }
-.chart-svg { display: block; width: 100%; height: auto; }
-.chart-grid { stroke: var(--neutral-line); stroke-width: 1; }
-.chart-axis {
-  fill: var(--text-faint);
-  font-size: 11px;
+.chart-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 8px 14px;
+  font-family: inherit;
+  font-size: 12.5px;
   font-weight: 600;
-  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
-.chart-axis-title {
-  fill: var(--text-faint);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
+.chart-reset:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-strong);
+  border-color: var(--border-strong);
 }
-.chart-line {
-  fill: none;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-/* İmlecin en yakın olduğu seri öne çıkar */
-.chart-line.is-hover { stroke-width: 3.2; }
+.chart-reset:disabled { opacity: 0.45; cursor: default; }
+.chart-reset:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* --- İmleç bilgi kutusu --- */
+/* --- ApexCharts'ın temaya uydurulması ------------------------------------
+   Kütüphane kendi CSS'ini sayfaya kendisi ekler; buradaki kurallar yalnızca
+   renkleri arayüzün değişkenlerine bağlar. Seçicilerde .chart-plot var,
+   böylece kurallar bu grafiğin dışına taşmaz.
+   ----------------------------------------------------------------------- */
 .chart-plot { position: relative; }
-.chart-svg { cursor: crosshair; }
+.chart-plot .apexcharts-canvas { margin-inline: auto; }
 
-.chart-guide {
+/* Araç çubuğu: yakınlaştır / uzaklaştır / seç / kaydır / sıfırla / menü */
+.chart-plot .apexcharts-toolbar { gap: 2px; }
+.chart-plot .apexcharts-toolbar svg { fill: var(--text-faint); }
+.chart-plot .apexcharts-toolbar .apexcharts-selected svg,
+.chart-plot .apexcharts-toolbar .apexcharts-menu-icon:hover svg,
+.chart-plot .apexcharts-toolbar .apexcharts-zoom-icon:hover svg,
+.chart-plot .apexcharts-toolbar .apexcharts-zoomin-icon:hover svg,
+.chart-plot .apexcharts-toolbar .apexcharts-zoomout-icon:hover svg,
+.chart-plot .apexcharts-toolbar .apexcharts-pan-icon:hover svg,
+.chart-plot .apexcharts-toolbar .apexcharts-reset-icon:hover svg {
+  fill: var(--accent);
+}
+.chart-plot .apexcharts-toolbar .apexcharts-pan-icon svg {
   stroke: var(--text-faint);
-  stroke-width: 1;
-  stroke-dasharray: 4 4;
-  pointer-events: none;
 }
-.chart-marker {
-  stroke: var(--card-to);
-  stroke-width: 2;
-  pointer-events: none;
+.chart-plot .apexcharts-toolbar .apexcharts-pan-icon.apexcharts-selected svg,
+.chart-plot .apexcharts-toolbar .apexcharts-pan-icon:hover svg {
+  stroke: var(--accent);
 }
 
-.chart-tip {
-  position: absolute;
-  z-index: 3;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 130px;
-  padding: 9px 11px;
-  /* Noktanın hemen üstünde, yatayda ortalanmış */
-  transform: translate(-50%, calc(-100% - 14px));
+/* Dışa aktarma menüsü */
+.chart-plot .apexcharts-menu {
   background: var(--bar);
-  backdrop-filter: blur(10px);
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   box-shadow: var(--shadow-menu);
-  pointer-events: none;
-  white-space: nowrap;
+  padding: 4px;
 }
-.chart-tip-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
+.chart-plot .apexcharts-menu-item {
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text-dim);
+  border-radius: 7px;
 }
-.chart-tip-head i {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.chart-tip-val {
-  font-size: 19px;
-  font-weight: 700;
+.chart-plot .apexcharts-menu-item:hover {
   color: var(--text);
-  font-variant-numeric: tabular-nums;
+  background: var(--surface);
 }
-.chart-tip-val em {
-  font-size: 12px;
-  font-style: normal;
+
+/* İmleç kutucuğu ve alt eksendeki zaman etiketi */
+.chart-plot .apexcharts-tooltip {
+  background: var(--bar) !important;
+  border: 1px solid var(--border-strong) !important;
+  border-radius: 10px;
+  box-shadow: var(--shadow-menu);
+  color: var(--text);
+}
+.chart-plot .apexcharts-tooltip-title {
+  background: transparent !important;
+  border-bottom: 1px solid var(--border) !important;
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--text-faint);
 }
-.chart-tip-time {
-  font-size: 11px;
-  color: var(--text-faint);
+.chart-plot .apexcharts-tooltip-text {
+  font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
+.chart-plot .apexcharts-tooltip-text-y-value { font-weight: 700; }
+.chart-plot .apexcharts-xaxistooltip {
+  background: var(--bar) !important;
+  border: 1px solid var(--border-strong) !important;
+  border-radius: 7px;
+  color: var(--text) !important;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.chart-plot .apexcharts-xaxistooltip-bottom::before,
+.chart-plot .apexcharts-xaxistooltip-bottom::after {
+  border-bottom-color: var(--border-strong);
+}
+
 .chart-hint {
   margin: 4px 0 0;
   padding: 10px 0;

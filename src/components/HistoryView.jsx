@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ApexCharts from 'apexcharts';
 import { BRIDGE_URL } from '../socket.js';
 import { CATEGORIES, FIELDS } from '../config/fields.js';
 
@@ -280,9 +281,8 @@ export default function HistoryView() {
 
           {groups.map((g) => (
             <div className="chart-card" key={g.id}>
-              <h3 className="chart-card-title">{g.title}</h3>
-
               <Chart
+                title={g.title}
                 samples={result.samples}
                 series={g.series}
                 fromMs={result.fromMs}
@@ -356,293 +356,263 @@ function FieldPicker({ fields, active, withData, onToggle, onAll, onNone }) {
 }
 
 // --- Grafik ---------------------------------------------------------------
-// Saf SVG çoklu seri çizgi grafiği; harici kütüphane kullanmaz.
-const W = 900;
-const H = 330;
-const PAD = { top: 16, right: 16, bottom: 34, left: 68 };
-const PLOT_W = W - PAD.left - PAD.right;
-const PLOT_H = H - PAD.top - PAD.bottom;
+// Çizim ApexCharts ile yapılır: yakınlaştırma/kaydırma araç çubuğu, imleç
+// kılavuzu, imleç kutucuğu ve dışa aktarma menüsü kütüphaneden hazır gelir.
+// Grafiğin kendisi dışındaki her şey (alan seçici, tarih paneli) değişmedi.
 
-// Zaman ekseninde hedeflenen bölüm sayısı. Aralık körü körüne buna bölünmez;
-// aşağıdaki "yuvarlak" adımlardan bu sayıyı aşmayan en küçüğü seçilir. Böylece
-// etiketler 09/08 07 gibi rastgele değil, 09.08 06:00 gibi okunabilir
-// sınırlara denk gelir.
-const X_DIVISIONS = 10;
+// Alanların büyüklükleri arasında birkaç kat fark var: bar basıncı yüzlerle,
+// tork ise birlerle ölçülüyor. Doğrusal eksende küçük seriler tabana yapışıp
+// okunmaz hale geliyordu, bu yüzden eksen SİMETRİK LOGARİTMİK: değerler
+// log10(1 + |v|) ile sıkıştırılır, işaret korunur. Böylece 0 ve negatif
+// değerler de çizilebilir (düz logaritma bunları çizemez).
+//
+// Eksen etiketleri ve imleç kutucuğu her zaman ters dönüşümle gerçek değeri
+// gösterir; sıkıştırma yalnızca çizim içindir.
+const symlog = (v) => Math.sign(v) * Math.log10(1 + Math.abs(v));
+const symexp = (u) => Math.sign(u) * (10 ** Math.abs(u) - 1);
 
-const DK = 60000;
-const SA = 60 * DK;
-const GUN = 24 * SA;
-const TIME_STEPS = [
-  DK, 2 * DK, 5 * DK, 10 * DK, 15 * DK, 30 * DK,
-  SA, 2 * SA, 3 * SA, 6 * SA, 12 * SA,
-  GUN,
-];
+// Araç çubuğu ipuçları ve tarih adları Türkçe olsun diye ApexCharts'a kendi
+// yerelimizi veriyoruz; kütüphane varsayılan olarak yalnızca İngilizce gelir.
+const TR_LOCALE = {
+  name: 'tr',
+  options: {
+    months: [
+      'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+      'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık',
+    ],
+    shortMonths: ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'],
+    days: ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'],
+    shortDays: ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'],
+    toolbar: {
+      exportToSVG: 'SVG indir',
+      exportToPNG: 'PNG indir',
+      exportToCSV: 'CSV indir',
+      menu: 'Menü',
+      selection: 'Seçim',
+      selectionZoom: 'Seçerek yakınlaştır',
+      zoomIn: 'Yakınlaştır',
+      zoomOut: 'Uzaklaştır',
+      pan: 'Kaydır',
+      reset: 'Görünümü sıfırla',
+    },
+  },
+};
 
-function pickTimeStep(spanMs, target) {
-  for (const step of TIME_STEPS) if (spanMs / step <= target) return step;
-  // Bir günden geniş aralıklarda gün katlarına çıkılır.
-  return Math.ceil(spanMs / target / GUN) * GUN;
-}
-
-// ms'yi yerel saate göre `step`in ilk katına yukarı yuvarlar.
-function ceilToStep(ms, step) {
-  const offset = new Date(ms).getTimezoneOffset() * DK;
-  return Math.ceil((ms - offset) / step) * step + offset;
-}
-
-function buildTimeTicks(fromMs, toMs, target) {
-  const step = pickTimeStep(toMs - fromMs, target);
-  const ticks = [];
-  for (let t = ceilToStep(fromMs, step); t <= toMs; t += step) ticks.push(t);
-  return { ticks, step };
-}
-
-// Zamana en yakın noktayı ikili aramayla bulur (noktalar zamana göre sıralı).
-function nearestPoint(points, t) {
-  if (points.length === 0) return null;
-  let lo = 0;
-  let hi = points.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (points[mid].t < t) lo = mid + 1;
-    else hi = mid;
-  }
-  const a = points[lo];
-  const b = points[lo - 1];
-  if (b && Math.abs(b.t - t) < Math.abs(a.t - t)) return b;
-  return a;
-}
-
-// İmlecin bir çizgi parçasına olan en kısa uzaklığı (SVG viewBox biriminde).
-function distanceToSegment(px, py, ax, ay, bx, by) {
-  const dx = bx - ax;
-  const dy = by - ay;
-  if (dx === 0 && dy === 0) return Math.hypot(px - ax, py - ay);
-  const ratio = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
-  return Math.hypot(px - (ax + ratio * dx), py - (ay + ratio * dy));
-}
-
-function Chart({ samples, series, fromMs, toMs, sampleMs }) {
-  const clipId = useId();
-  const svgRef = useRef(null);
-  // İmlecin altındaki seri: { line, point, x, y, cssX, cssY }
-  const [hover, setHover] = useState(null);
-
-  // Her seri için { color, label, segments: [[{t,v}...]] }
-  const lines = useMemo(() => {
-    const gapMs = Math.max((sampleMs || 10000) * 3, 30000);
-    return series.map((s) => {
-      const pts = samples
-        .map((row) => ({ t: Date.parse(row.t), v: Number(row[s.key]) }))
-        .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.v));
-
-      const segments = [];
-      let cur = [];
-      for (const p of pts) {
-        if (cur.length && p.t - cur[cur.length - 1].t > gapMs) {
-          segments.push(cur);
-          cur = [];
-        }
-        cur.push(p);
-      }
-      if (cur.length) segments.push(cur);
-      return { ...s, points: pts, segments };
-    });
-  }, [samples, series, sampleMs]);
-
-  const allValues = lines.flatMap((l) => l.points.map((p) => p.v));
-  const hasData = allValues.length > 0;
-
-  let lo = hasData ? Math.min(...allValues) : 0;
-  let hi = hasData ? Math.max(...allValues) : 2;
-  if (lo === hi) {
-    lo -= 1;
-    hi += 1;
-  } else if (hasData) {
-    const pad = (hi - lo) * 0.08;
-    lo -= pad;
-    hi += pad;
-  }
-
-  const x = (t) => PAD.left + ((t - fromMs) / (toMs - fromMs || 1)) * PLOT_W;
-  const y = (v) => PAD.top + (1 - (v - lo) / (hi - lo)) * PLOT_H;
-
-  const span = hi - lo;
-  const axisDecimals = span >= 100 ? 0 : span >= 10 ? 1 : 2;
-  const yTicks = Array.from({ length: 5 }, (_, i) => lo + (span * i) / 4);
-  const spanMs = toMs - fromMs;
-  const { ticks: xTicks, step: xStep } = buildTimeTicks(fromMs, toMs, X_DIVISIONS);
-
-  // Tooltip yalnızca imleç gerçek bir seri çizgisine yeterince yakınsa açılır.
-  const onMove = (e) => {
-    const svg = svgRef.current;
-    if (!svg || lines.length === 0) return;
-    const rect = svg.getBoundingClientRect();
-    if (rect.width === 0) return;
-    const scale = W / rect.width; // viewBox birimi / CSS pikseli
-    const vbX = (e.clientX - rect.left) * scale;
-    const vbY = (e.clientY - rect.top) * scale;
-
-    if (
-      vbX < PAD.left || vbX > W - PAD.right ||
-      vbY < PAD.top || vbY > PAD.top + PLOT_H
-    ) {
-      setHover(null);
-      return;
-    }
-
-    let best = null;
-    for (const l of lines) {
-      for (const segment of l.segments) {
-        if (segment.length === 1) {
-          const p = segment[0];
-          const d = Math.hypot(vbX - x(p.t), vbY - y(p.v));
-          if (!best || d < best.d) best = { d, line: l };
-          continue;
-        }
-        for (let i = 1; i < segment.length; i += 1) {
-          const a = segment[i - 1];
-          const b = segment[i];
-          const d = distanceToSegment(
-            vbX,
-            vbY,
-            x(a.t),
-            y(a.v),
-            x(b.t),
-            y(b.v)
-          );
-          if (!best || d < best.d) best = { d, line: l };
-        }
-      }
-    }
-    // Yaklaşık 7 CSS pikseli dışındaki hareketleri çizgi üzerinde sayma.
-    if (!best || best.d > 7 * scale) {
-      setHover(null);
-      return;
-    }
-
-    const t = fromMs + ((vbX - PAD.left) / PLOT_W) * (toMs - fromMs);
-    const point = nearestPoint(best.line.points, t);
-    const py = y(point.v);
-    const px = x(point.t);
-    setHover({
-      line: best.line,
-      point,
-      x: px,
-      y: py,
-      // Kutucuk HTML olduğu için konum CSS pikseline çevrilir; kenarlardan
-      // taşmasın diye sınırlanır.
-      cssX: Math.min(Math.max(px / scale, 78), rect.width - 78),
-      cssY: py / scale,
-    });
+// ApexCharts somut renk ister; arayüzün renkleri ise CSS değişkenlerinde.
+// Tema değişince değişkenler yeniden hesaplanır, burada okunan değerler de
+// bu yüzden tema anahtarına bağlı yenilenir.
+function readPalette() {
+  const cs = getComputedStyle(document.documentElement);
+  const val = (name, fallback) => cs.getPropertyValue(name).trim() || fallback;
+  return {
+    axis: val('--text-faint', '#8593a3'),
+    grid: val('--neutral-line', 'rgba(255, 255, 255, 0.16)'),
   };
+}
+
+// <html data-theme> özniteliğini izler; tema düğmesiyle palet değişince
+// grafiğin renkleri de sayfa yenilenmeden birlikte değişsin diye.
+function useThemeMode() {
+  const read = () =>
+    document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  const [mode, setMode] = useState(read);
+  useEffect(() => {
+    const obs = new MutationObserver(() => setMode(read()));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => obs.disconnect();
+  }, []);
+  return mode;
+}
+
+function Chart({ title, samples, series, fromMs, toMs, sampleMs }) {
+  const hostRef = useRef(null);
+  const chartRef = useRef(null);
+  const mode = useThemeMode();
+  const palette = useMemo(() => readPalette(), [mode]);
+
+  // Çizginin nerede kopacağını belirleyen eşik. Köprü aralığı ~1200 noktaya
+  // seyrelttiği için ardışık örnekler arasındaki mesafe, ham örnekleme
+  // aralığından (sampleMs, 5 sn) çok daha büyük olabilir: bir günlük aralıkta
+  // yaklaşık bir dakika. Eşik sampleMs'ten türetilseydi çizgi neredeyse her
+  // noktada kopar, grafik çizgi yerine nokta bulutuna dönerdi.
+  //
+  // Bu yüzden eşik gelen örneklerin GERÇEK aralığından hesaplanır. Ortalama
+  // yerine medyan alınır: tek tük kesintiler medyanı kaydırmaz, dolayısıyla
+  // gerçek veri boşlukları hâlâ kopuk görünür.
+  const gapMs = useMemo(() => {
+    const deltas = [];
+    for (let i = 1; i < samples.length; i += 1) {
+      const d = Date.parse(samples[i].t) - Date.parse(samples[i - 1].t);
+      if (Number.isFinite(d) && d > 0) deltas.push(d);
+    }
+    const floor = Math.max((sampleMs || 10000) * 3, 30000);
+    if (deltas.length === 0) return floor;
+    deltas.sort((a, b) => a - b);
+    return Math.max(deltas[deltas.length >> 1] * 4, floor);
+  }, [samples, sampleMs]);
+
+  // Seriler ApexCharts'ın beklediği [zaman, değer] çiftlerine çevrilir.
+  // Veri akışının kesildiği yere null bir nokta konur; kütüphane orada
+  // çizgiyi koparır, iki uç noktayı yanlışlıkla birleştirmez.
+  const apexSeries = useMemo(() => {
+    return series.map((s) => {
+      const data = [];
+      let prevT = null;
+      for (const row of samples) {
+        const t = Date.parse(row.t);
+        const v = Number(row[s.key]);
+        if (!Number.isFinite(t) || !Number.isFinite(v)) continue;
+        if (prevT !== null && t - prevT > gapMs) data.push([prevT + 1, null]);
+        data.push([t, symlog(v)]);
+        prevT = t;
+      }
+      return { name: s.label, data };
+    });
+  }, [samples, series, gapMs]);
+
+  const hasData = apexSeries.some((s) => s.data.length > 0);
+
+  const options = useMemo(
+    () => ({
+      chart: {
+        type: 'line',
+        height: 400,
+        fontFamily: 'inherit',
+        background: 'transparent',
+        foreColor: palette.axis,
+        locales: [TR_LOCALE],
+        defaultLocale: 'tr',
+        animations: { enabled: false },
+        zoom: { enabled: true, type: 'x', autoScaleYaxis: true },
+        toolbar: {
+          show: true,
+          autoSelected: 'zoom',
+          tools: {
+            download: true,
+            selection: false,
+            zoom: true,
+            zoomin: true,
+            zoomout: true,
+            pan: true,
+            reset: true,
+          },
+        },
+      },
+      theme: { mode },
+      colors: series.map((s) => s.color),
+      stroke: { curve: 'straight', width: 2 },
+      // Nokta göstermek yoğun seride grafiği okunmaz yapıyor; yalnızca
+      // imleç bir seriye değdiğinde o noktayı büyütüyoruz.
+      markers: { size: 0, hover: { size: 4 } },
+      dataLabels: { enabled: false },
+      legend: { show: false },
+      grid: {
+        borderColor: palette.grid,
+        strokeDashArray: 4,
+        xaxis: { lines: { show: false } },
+        yaxis: { lines: { show: true } },
+        padding: { top: 0, right: 16, bottom: 0, left: 8 },
+      },
+      xaxis: {
+        type: 'datetime',
+        min: fromMs,
+        max: toMs,
+        axisBorder: { show: false },
+        axisTicks: { color: palette.grid },
+        labels: {
+          datetimeUTC: false,
+          style: { fontSize: '11px', fontWeight: 600, colors: palette.axis },
+        },
+        crosshairs: { stroke: { color: palette.axis, width: 1, dashArray: 4 } },
+        tooltip: { enabled: true },
+      },
+      yaxis: {
+        title: {
+          text: 'Değer (log)',
+          style: { fontSize: '11px', fontWeight: 600, color: palette.axis },
+        },
+        tickAmount: 6,
+        labels: {
+          style: { fontSize: '11px', fontWeight: 600, colors: palette.axis },
+          formatter: (u) => formatAxisValue(symexp(u)),
+        },
+      },
+      tooltip: {
+        shared: false,
+        intersect: false,
+        theme: mode,
+        x: { format: 'dd MMM HH:mm' },
+        y: {
+          formatter: (u, ctx) => {
+            if (u === null || u === undefined) return '';
+            const s = series[ctx?.seriesIndex] ?? {};
+            return `${formatNum(symexp(u), s.decimals ?? 2)}${s.unit ? ` ${s.unit}` : ''}`;
+          },
+        },
+      },
+      noData: { text: '' },
+    }),
+    [series, fromMs, toMs, mode, palette]
+  );
+
+  // Grafik bir kez kurulur; sonraki değişiklikler yeniden kurmadan
+  // güncellenir, böylece yakınlaştırma her seçimde sıfırlanmaz.
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+  const seriesRef = useRef(apexSeries);
+  seriesRef.current = apexSeries;
+
+  useEffect(() => {
+    const chart = new ApexCharts(hostRef.current, {
+      ...optionsRef.current,
+      series: seriesRef.current,
+    });
+    chartRef.current = chart;
+    chart.render();
+    return () => {
+      chart.destroy();
+      chartRef.current = null;
+    };
+  }, []);
+
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) return;
+    chartRef.current?.updateOptions(options, false, false);
+  }, [options]);
+
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    chartRef.current?.updateSeries(apexSeries, false);
+  }, [apexSeries]);
+
+  // Araç çubuğundaki ev simgesiyle aynı işi yapar; kart başlığındaki düğme
+  // yakınlaştırma/kaydırmadan sonra seçilen aralığa dönmenin görünür yolu.
+  const resetView = () => chartRef.current?.zoomX(fromMs, toMs);
 
   return (
     <>
-      <div className="chart-plot">
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 ${W} ${H}`}
-          className="chart-svg"
-          role="img"
-          aria-label="Geçmiş grafiği"
-          onMouseMove={onMove}
-          onMouseLeave={() => setHover(null)}
-        >
-        <defs>
-          <clipPath id={clipId}>
-            <rect x={PAD.left} y={PAD.top} width={PLOT_W} height={PLOT_H} />
-          </clipPath>
-        </defs>
-
-        <text
-          className="chart-axis-title"
-          transform={`rotate(-90 16 ${PAD.top + PLOT_H / 2}) translate(16 ${PAD.top + PLOT_H / 2})`}
-          textAnchor="middle"
-        >
-          Değer
-        </text>
-
-        {yTicks.map((v, i) => (
-          <g key={i}>
-            <line x1={PAD.left} y1={y(v)} x2={W - PAD.right} y2={y(v)} className="chart-grid" />
-            <text x={PAD.left - 10} y={y(v) + 4} textAnchor="end" className="chart-axis">
-              {formatNum(v, axisDecimals)}
-            </text>
-          </g>
-        ))}
-
-        {xTicks.map((t) => {
-          // Etiketler artık yuvarlak sınırlara oturduğu için uçlara tam
-          // denk gelmeyebilir; kenara yakın olanlar dışarı taşmasın.
-          const px = x(t);
-          const anchor =
-            px < PAD.left + 24 ? 'start' : px > W - PAD.right - 24 ? 'end' : 'middle';
-          return (
-            <text key={t} x={px} y={H - 12} textAnchor={anchor} className="chart-axis">
-              {formatAxisTime(t, spanMs, xStep)}
-            </text>
-          );
-        })}
-
-        {hover && (
-          <line
-            x1={hover.x}
-            y1={PAD.top}
-            x2={hover.x}
-            y2={PAD.top + PLOT_H}
-            className="chart-guide"
-          />
-        )}
-
-        <g clipPath={`url(#${clipId})`}>
-          {lines.map((l) =>
-            l.segments.map((seg, i) =>
-              seg.length > 1 ? (
-                <path
-                  key={`${l.key}-${i}`}
-                  d={seg.map((p, j) => `${j === 0 ? 'M' : 'L'} ${x(p.t)} ${y(p.v)}`).join(' ')}
-                  className={`chart-line ${hover?.line.key === l.key ? 'is-hover' : ''}`}
-                  style={{ stroke: l.color }}
-                />
-              ) : (
-                <circle
-                  key={`${l.key}-${i}`}
-                  cx={x(seg[0].t)}
-                  cy={y(seg[0].v)}
-                  r="2.5"
-                  style={{ fill: l.color }}
-                />
-              )
-            )
-          )}
-        </g>
-
-        {hover && (
-          <circle
-            cx={hover.x}
-            cy={hover.y}
-            r="4.5"
-            className="chart-marker"
-            style={{ fill: hover.line.color }}
-          />
-        )}
-      </svg>
-
-        {hover && (
-          <div className="chart-tip" style={{ left: `${hover.cssX}px`, top: `${hover.cssY}px` }}>
-            <span className="chart-tip-head">
-              <i style={{ background: hover.line.color }} aria-hidden="true" />
-              {hover.line.label}
-            </span>
-            <span className="chart-tip-val">
-              {formatNum(hover.point.v, hover.line.decimals)}
-              {hover.line.unit ? <em> {hover.line.unit}</em> : null}
-            </span>
-            <span className="chart-tip-time">{formatStamp(hover.point.t)}</span>
-          </div>
-        )}
+      <div className="chart-card-head">
+        <span className="chart-card-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="5" />
+            <path d="M7 15l3.5-4 2.5 2.5L17 9" />
+          </svg>
+        </span>
+        <h3 className="chart-card-title">{title}</h3>
+        <button type="button" className="chart-reset" onClick={resetView} disabled={!hasData}>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="6" />
+            <path d="M20 20l-3.6-3.6" />
+          </svg>
+          Görünümü sıfırla
+        </button>
       </div>
+
+      <div className="chart-plot" ref={hostRef} />
 
       {series.length === 0 && (
         <p className="chart-hint">Grafiğe eklemek için aşağıdan veri seçin.</p>
@@ -650,7 +620,6 @@ function Chart({ samples, series, fromMs, toMs, sampleMs }) {
       {series.length > 0 && !hasData && (
         <p className="chart-hint">Seçilen veriler bu aralıkta kayıtlı değil.</p>
       )}
-
     </>
   );
 }
@@ -673,13 +642,10 @@ function formatStamp(ms) {
   });
 }
 
-// Etiket ayrıntısı adıma göre kısalır: günlük adımda saat yazmaya gerek yok,
-// tek günlük aralıkta da tarih tekrar etmesin.
-function formatAxisTime(ms, spanMs, step) {
-  const d = new Date(ms);
-  const gun = d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' });
-  const saat = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-  if (step >= GUN) return gun;
-  if (spanMs <= GUN) return saat;
-  return `${gun} ${saat}`;
+// Değer ekseni etiketi. Basamak sayısı büyüklüğe göre kısalır: 549 tam sayı
+// yazılır, 0,77 iki hane ister. Sondaki sıfırlar atılır (4,60 değil 4,6).
+function formatAxisValue(v) {
+  const abs = Math.abs(v);
+  const decimals = abs >= 100 ? 0 : abs >= 10 ? 1 : 2;
+  return v.toLocaleString('tr-TR', { maximumFractionDigits: decimals });
 }
