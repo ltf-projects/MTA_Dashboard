@@ -360,16 +360,25 @@ function FieldPicker({ fields, active, withData, onToggle, onAll, onNone }) {
 // kılavuzu, imleç kutucuğu ve dışa aktarma menüsü kütüphaneden hazır gelir.
 // Grafiğin kendisi dışındaki her şey (alan seçici, tarih paneli) değişmedi.
 
-// Alanların büyüklükleri arasında birkaç kat fark var: bar basıncı yüzlerle,
-// tork ise birlerle ölçülüyor. Doğrusal eksende küçük seriler tabana yapışıp
-// okunmaz hale geliyordu, bu yüzden eksen SİMETRİK LOGARİTMİK: değerler
-// log10(1 + |v|) ile sıkıştırılır, işaret korunur. Böylece 0 ve negatif
-// değerler de çizilebilir (düz logaritma bunları çizemez).
+// Eksen DOĞRUSAL: değerler olduğu gibi çizilir, eksen üzerindeki eşit
+// mesafeler eşit değer farkı demektir. Önceden logaritmik sıkıştırma vardı;
+// küçük serileri görünür kılıyordu ama 0-1 arasıyla 10-100 arasını aynı
+// mesafede gösterdiği için eksen yanıltıcıydı.
 //
-// Eksen etiketleri ve imleç kutucuğu her zaman ters dönüşümle gerçek değeri
-// gösterir; sıkıştırma yalnızca çizim içindir.
-const symlog = (v) => Math.sign(v) * Math.log10(1 + Math.abs(v));
-const symexp = (u) => Math.sign(u) * (10 ** Math.abs(u) - 1);
+// Bunun bedeli: yüzlerle ölçülen basınçlarla birlerle ölçülen tork aynı
+// grafikte açıkken küçük seriler tabana yakın kalır. Böyle bir durumda o
+// serileri ayrı ayrı seçip incelemek gerekir.
+
+// Eksen çizgilerinin oturacağı adım: aralığı yaklaşık 6 parçaya bölen, ama
+// 1 / 2 / 2,5 / 5 ve bunların on katlarından biri olan değer. Ondalıklı bir
+// adım (örn. 5,25) etiketleri okunmaz kıldığı için adım daima yuvarlaktır.
+function niceStep(raw) {
+  if (!(raw > 0)) return 1;
+  const base = 10 ** Math.floor(Math.log10(raw));
+  const m = raw / base;
+  const mult = m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10;
+  return mult * base;
+}
 
 // Araç çubuğu ipuçları ve tarih adları Türkçe olsun diye ApexCharts'a kendi
 // yerelimizi veriyoruz; kütüphane varsayılan olarak yalnızca İngilizce gelir.
@@ -463,7 +472,7 @@ function Chart({ title, samples, series, fromMs, toMs, sampleMs }) {
         const v = Number(row[s.key]);
         if (!Number.isFinite(t) || !Number.isFinite(v)) continue;
         if (prevT !== null && t - prevT > gapMs) data.push([prevT + 1, null]);
-        data.push([t, symlog(v)]);
+        data.push([t, v]);
         prevT = t;
       }
       return { name: s.label, data };
@@ -471,6 +480,35 @@ function Chart({ title, samples, series, fromMs, toMs, sampleMs }) {
   }, [samples, series, gapMs]);
 
   const hasData = apexSeries.some((s) => s.data.length > 0);
+
+  // Eksenin alt/üst sınırı ve kaç çizgi çizileceği. ApexCharts kendi başına
+  // ölçeklerse durakları veri aralığını eşit bölerek seçiyor ve 2,16 / 30,6
+  // gibi keyfi etiketler çıkabiliyor. Sınırları yuvarlak bir adımın katlarına
+  // oturtunca duraklar da yuvarlak oluyor: 0 / 50 / 100 / 150 gibi.
+  const yBounds = useMemo(() => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const s of apexSeries) {
+      for (const [, v] of s.data) {
+        if (v === null) continue;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+    }
+    if (!Number.isFinite(lo)) return { min: 0, max: 100, tickAmount: 5 };
+
+    // Tüm seriler sabit tek bir değerdeyse aralık sıfır olur; çizgi grafiğin
+    // ortasında kalsın diye iki yana biraz pay bırakıyoruz.
+    if (hi === lo) {
+      const pad = Math.max(Math.abs(hi) * 0.1, 1);
+      lo -= pad;
+      hi += pad;
+    }
+    const step = niceStep((hi - lo) / 6);
+    const min = Math.floor(lo / step) * step;
+    const max = Math.ceil(hi / step) * step;
+    return { min, max, tickAmount: Math.round((max - min) / step) };
+  }, [apexSeries]);
 
   const options = useMemo(
     () => ({
@@ -483,6 +521,10 @@ function Chart({ title, samples, series, fromMs, toMs, sampleMs }) {
         locales: [TR_LOCALE],
         defaultLocale: 'tr',
         animations: { enabled: false },
+        // Yakınlaştırınca eksen görünen veriye göre yeniden ölçeklenir;
+        // doğrusal eksende küçük değerlere yakınlaşmanın tek yolu bu.
+        // Yeni sınırların yine yuvarlak sayılara oturmasını forceNiceScale
+        // sağlıyor (bkz. yaxis).
         zoom: { enabled: true, type: 'x', autoScaleYaxis: true },
         toolbar: {
           show: true,
@@ -528,13 +570,16 @@ function Chart({ title, samples, series, fromMs, toMs, sampleMs }) {
       },
       yaxis: {
         title: {
-          text: 'Değer (log)',
+          text: 'Değer',
           style: { fontSize: '11px', fontWeight: 600, color: palette.axis },
         },
-        tickAmount: 6,
+        min: yBounds.min,
+        max: yBounds.max,
+        tickAmount: yBounds.tickAmount,
+        forceNiceScale: true,
         labels: {
           style: { fontSize: '11px', fontWeight: 600, colors: palette.axis },
-          formatter: (u) => formatAxisValue(symexp(u)),
+          formatter: (v) => formatAxisValue(v),
         },
       },
       tooltip: {
@@ -543,16 +588,16 @@ function Chart({ title, samples, series, fromMs, toMs, sampleMs }) {
         theme: mode,
         x: { format: 'dd MMM HH:mm' },
         y: {
-          formatter: (u, ctx) => {
-            if (u === null || u === undefined) return '';
+          formatter: (v, ctx) => {
+            if (v === null || v === undefined) return '';
             const s = series[ctx?.seriesIndex] ?? {};
-            return `${formatNum(symexp(u), s.decimals ?? 2)}${s.unit ? ` ${s.unit}` : ''}`;
+            return `${formatNum(v, s.decimals ?? 2)}${s.unit ? ` ${s.unit}` : ''}`;
           },
         },
       },
       noData: { text: '' },
     }),
-    [series, fromMs, toMs, mode, palette]
+    [series, fromMs, toMs, mode, palette, yBounds.min, yBounds.max, yBounds.tickAmount]
   );
 
   // Grafik bir kez kurulur; sonraki değişiklikler yeniden kurmadan
