@@ -38,8 +38,8 @@ export const CATEGORIES = [
 // varsa o kazanır.
 const MACHINE_FIELDS = [
   { key: 'AnalogData1', tr: 'Ana Pompa Basıncı', unit: 'BAR', min: 0, max: 340, zones: zones(255, 290, 340) },
-  { key: 'AnalogData2', tr: 'Servis Pompası', unit: 'BAR', min: 0, max: 250, zones: zones(190, 215, 250) },
-  { key: 'AnalogData3', tr: 'Servis Pompa Basıncı', unit: 'BAR', min: 0, max: 250, zones: zones(190, 212, 250) },
+  { key: 'AnalogData2', tr: 'Servis Pompası', unit: 'BAR', min: 0, max: 350, zones: zones(190, 215, 350) },
+  { key: 'AnalogData3', tr: 'Servis Pompa Basıncı', unit: 'BAR', min: 0, max: 350, zones: zones(190, 212, 350) },
   { key: 'AnalogData4', tr: 'Rotasyon Tork', unit: 'BAR', min: 0, max: 270, zones: zones(205, 232, 270) },
   { key: 'AnalogData5', tr: 'Baskı Basıncı', unit: 'BAR', min: 0, max: 270, zones: zones(205, 232, 270) },
   { key: 'AnalogData6', tr: 'Askı Basıncı', unit: 'BAR', min: 0, max: 50, zones: zones(20, 27, 50), tickDecimals: 1 },
