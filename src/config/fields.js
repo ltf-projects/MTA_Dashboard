@@ -54,12 +54,6 @@ const MACHINE_FIELDS = [
   { key: 'AnalogData9', tr: 'Wireline Vinç', min: 0, max: 320, zones: zones(230, 242, 320) },
   { key: 'AnalogData10', tr: 'Çamur Su Basıncı', unit: 'BAR', min: 0, max: 320, zones: zones(225, 250, 320) },
   { key: 'AnalogData11', tr: 'Rotasyon İlerleme', min: 0, max: 350, zones: zones(330, 342, 350) },
-  // Eşikler henüz teyit edilmedi; diğer göstergelerle aynı orana göre kondu.
-  { key: 'AnalogData12', tr: 'Su Litre', unit: 'Litre', min: 0, max: 15000, zones: zones(11250, 12750, 15000) },
-  { key: 'AnalogData13', tr: 'Makine Roll', min: -90, max: 90, zones: zones(55, 70, 90) },
-  { key: 'AnalogData14', tr: 'Makine Pitch', min: -90, max: 90, zones: zones(55, 70, 90) },
-  { key: 'AnalogData15', tr: 'Kule Roll', min: -90, max: 90, zones: zones(55, 70, 90) },
-  { key: 'AnalogData16', tr: 'Kule Pitch', min: -90, max: 90, zones: zones(55, 70, 90) },
   // Rotasyon Devir "Dijital Makine Verileri"nden buraya taşındı; değeri analog
   // pakette değil ana pakette (AuxData1) geldiği için kaynağı ayrıca yazılır.
   {
@@ -71,6 +65,12 @@ const MACHINE_FIELDS = [
     zones: zones(1250, 1280, 1300),
     source: 'data',
   },
+  // Eşikler henüz teyit edilmedi; diğer göstergelerle aynı orana göre kondu.
+  { key: 'AnalogData12', tr: 'Su Litre', unit: 'Litre', min: 0, max: 15000, zones: zones(11250, 12750, 15000) },
+  { key: 'AnalogData13', tr: 'Makine Roll', min: -90, max: 90, zones: zones(55, 70, 90) },
+  { key: 'AnalogData14', tr: 'Makine Pitch', min: -90, max: 90, zones: zones(55, 70, 90) },
+  { key: 'AnalogData15', tr: 'Kule Roll', min: -90, max: 90, zones: zones(55, 70, 90) },
+  { key: 'AnalogData16', tr: 'Kule Pitch', min: -90, max: 90, zones: zones(55, 70, 90) },
 ].map((f) => ({ unit: '', decimals: 2, source: 'analog', ...f, category: 'makine', kind: 'gauge' }));
 
 // --- Motor Verileri: göstergelerin üstündeki özet kartları ----------------

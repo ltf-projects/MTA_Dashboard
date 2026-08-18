@@ -4,10 +4,15 @@ import Gauge from './Gauge.jsx';
 import StatCard from './StatCard.jsx';
 import DigitalCard from './DigitalCard.jsx';
 import HistoryView from './HistoryView.jsx';
+import ReportView from './ReportView.jsx';
 
 // Canlı kategorilerin yanındaki geçmiş sekmesi. Diğerleri gelen paketi
 // çizerken bu sekme köprüdeki /history ucundan kendi verisini çeker.
 const HISTORY_ID = 'gecmis';
+
+// Geçmiş sekmesinin yanındaki rapor sekmesi. İçeriği henüz yok; canlı pakete
+// de bağlı değil, o yüzden kendi bileşenini doğrudan çizer.
+const REPORT_ID = 'rapor';
 
 // Arama için metni normalleştirir: Türkçe büyük/küçük harf kuralları (I→ı,
 // İ→i) uygulanır, ardından aksanlı harfler ASCII karşılığına indirgenir.
@@ -39,8 +44,15 @@ export default function DataView({
     typeof resAnalogData === 'object' &&
     !Array.isArray(resAnalogData);
 
-  const tabs = [...CATEGORIES, { id: HISTORY_ID, title: 'Geçmiş Grafik' }];
+  const tabs = [
+    ...CATEGORIES,
+    { id: HISTORY_ID, title: 'Geçmiş Grafik' },
+    { id: REPORT_ID, title: 'Sondaj Makine Raporu' },
+  ];
   const isHistory = activeCategory === HISTORY_ID;
+  const isReport = activeCategory === REPORT_ID;
+  // Canlı paketi çizen sekmeler: arama ve "veri bekleniyor" yalnızca bunlarda.
+  const isLive = !isHistory && !isReport;
   const isMachine = activeCategory === 'makine';
   const livePacket = isMachine ? analogPacket : packet;
   const receivedAt = livePacket?.receivedAt;
@@ -130,8 +142,8 @@ export default function DataView({
           ))}
         </nav>
 
-        {/* Arama canlı kartları süzer; geçmiş sekmesinin kendi denetimleri var. */}
-        {!isHistory && (
+        {/* Arama canlı kartları süzer; geçmiş ve rapor sekmelerinde yeri yok. */}
+        {isLive && (
           <div className="search-box">
             <svg className="search-icon" viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="11" cy="11" r="7" />
@@ -161,6 +173,8 @@ export default function DataView({
 
       {isHistory ? (
         <HistoryView />
+      ) : isReport ? (
+        <ReportView />
       ) : !livePacket ? (
         <WaitingState topic={topic} boxId={boxId} />
       ) : isEmpty ? (

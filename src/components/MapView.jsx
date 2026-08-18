@@ -5,15 +5,25 @@ import 'leaflet/dist/leaflet.css';
 // Google Hybrid (uydu + etiketler) harita katmanı. lyrs=y => hybrid.
 const GOOGLE_HYBRID = 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
 
-// Modern, nabız atan konum işaretçisi (divIcon ile).
-const markerIcon = L.divIcon({
-  className: 'mta-marker',
-  html: '<span class="mta-marker-pulse"></span><span class="mta-marker-dot"></span>',
-  iconSize: [22, 22],
-  iconAnchor: [11, 11],
-});
+// Sondaj makinesi ikonlu iğne işaretçisi (divIcon ile): beyaz daire içinde
+// makine görseli, altında konumu gösteren uç. Uç tam koordinatın üstüne
+// gelsin diye iconAnchor işaretçinin alt orta noktasıdır. Çerçeve rengi
+// veri akışını taşır: akış varsa yeşil, durmuşsa kırmızı.
+const makeIcon = (stale) =>
+  L.divIcon({
+    className: `mta-marker ${stale ? 'is-stale' : 'is-live'}`,
+    html: [
+      '<span class="mta-marker-pulse"></span>',
+      '<span class="mta-marker-tail"></span>',
+      '<span class="mta-marker-pin">',
+      '<img class="mta-marker-img" src="/drill-icon-latest.png" alt="" />',
+      '</span>',
+    ].join(''),
+    iconSize: [64, 78],
+    iconAnchor: [32, 78],
+  });
 
-export default function MapView({ lat, lon }) {
+export default function MapView({ lat, lon, stale = false }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const markerRef = useRef(null);
@@ -35,7 +45,7 @@ export default function MapView({ lat, lon }) {
       attribution: '© Google',
     }).addTo(map);
 
-    markerRef.current = L.marker([lat, lon], { icon: markerIcon }).addTo(map);
+    markerRef.current = L.marker([lat, lon], { icon: makeIcon(stale) }).addTo(map);
     mapRef.current = map;
 
     // Konteyner boyutu yerleşince haritayı düzelt
@@ -48,6 +58,11 @@ export default function MapView({ lat, lon }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Veri akışı durup başlayınca işaretçinin çerçeve rengi değişir.
+  useEffect(() => {
+    markerRef.current?.setIcon(makeIcon(stale));
+  }, [stale]);
 
   // Koordinat değişince işaretçiyi güncelle; haritayı yalnızca işaretçi
   // görünümün kenarına yaklaşınca yeniden ortala (sabit makinede titremeyi önler).

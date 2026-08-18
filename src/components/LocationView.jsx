@@ -28,7 +28,7 @@ export default function LocationView({ packet, topic, boxId, stale = false }) {
         <div className="map-wrap">
           {coords ? (
             <>
-              <MapView lat={coords.lat} lon={coords.lon} />
+              <MapView lat={coords.lat} lon={coords.lon} stale={stale} />
 
               <div className={`geo-indicator ${stale ? 'is-stale' : ''}`}>
                 <div className="geo-live">
