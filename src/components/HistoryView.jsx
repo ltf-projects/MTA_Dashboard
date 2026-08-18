@@ -328,7 +328,16 @@ function useThemeMode() {
   return mode;
 }
 
-function Chart({ title, samples, series, fromMs, toMs, sampleMs }) {
+export function Chart({
+  title,
+  samples,
+  series,
+  fromMs,
+  toMs,
+  sampleMs,
+  controls = null,
+  emptyHint = 'Grafiğe eklemek için aşağıdan veri seçin.',
+}) {
   const hostRef = useRef(null);
   const chartRef = useRef(null);
   const mode = useThemeMode();
@@ -552,10 +561,12 @@ function Chart({ title, samples, series, fromMs, toMs, sampleMs }) {
         </button>
       </div>
 
+      {controls}
+
       <div className="chart-plot" ref={hostRef} />
 
       {series.length === 0 && (
-        <p className="chart-hint">Grafiğe eklemek için aşağıdan veri seçin.</p>
+        <p className="chart-hint">{emptyHint}</p>
       )}
       {series.length > 0 && !hasData && (
         <p className="chart-hint">Seçilen veriler bu aralıkta kayıtlı değil.</p>

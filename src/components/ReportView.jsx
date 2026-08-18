@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BRIDGE_URL } from '../socket.js';
+import { Chart } from './HistoryView.jsx';
 import RangePicker, {
   startOfToday,
   toLocalInput,
@@ -47,6 +48,24 @@ const ICONS = {
   ),
 };
 
+// Rapor grafiğinde alan seçici yoktur; bu iki seri her zaman birlikte çizilir.
+const REPORT_SERIES = [
+  {
+    key: 'AuxData1',
+    label: 'Rotasyon Devir',
+    unit: 'devir',
+    decimals: 2,
+    color: '#14b8a6',
+  },
+  {
+    key: 'AnalogData7',
+    label: 'Wireline Winç',
+    unit: 'BAR',
+    decimals: 2,
+    color: '#fb923c',
+  },
+];
+
 // Kartlarda "23 saat 59 dk" biçimi.
 function splitDuration(ms) {
   const total = Math.max(0, Math.round(ms / 60000));
@@ -59,6 +78,9 @@ export default function ReportView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
+  const [activeSeries, setActiveSeries] = useState(
+    () => new Set(REPORT_SERIES.map((s) => s.key))
+  );
 
   const load = useCallback(async () => {
     const { error: invalidMsg, fromMs, toMs } = validateRange(from, to, Date.now());
@@ -70,11 +92,23 @@ export default function ReportView() {
     setLoading(true);
     setError(null);
     try {
-      const url = new URL('/report', BRIDGE_URL);
-      url.searchParams.set('from', new Date(fromMs).toISOString());
-      url.searchParams.set('to', new Date(toMs).toISOString());
-      const res = await fetch(url);
-      if (!res.ok) {
+      const fromIso = new Date(fromMs).toISOString();
+      const toIso = new Date(toMs).toISOString();
+      const reportUrl = new URL('/report', BRIDGE_URL);
+      reportUrl.searchParams.set('from', fromIso);
+      reportUrl.searchParams.set('to', toIso);
+      const historyUrl = new URL('/history', BRIDGE_URL);
+      historyUrl.searchParams.set('from', fromIso);
+      historyUrl.searchParams.set('to', toIso);
+      historyUrl.searchParams.set('keys', REPORT_SERIES.map((s) => s.key).join(','));
+
+      const [reportRes, historyRes] = await Promise.all([
+        fetch(reportUrl),
+        fetch(historyUrl),
+      ]);
+
+      for (const res of [reportRes, historyRes]) {
+        if (res.ok) continue;
         // Köprü sebebini yazıyorsa (veritabanı kapalı, bağlantı yok...) onu
         // olduğu gibi göster.
         let msg = `Sunucu ${res.status} döndü.`;
@@ -86,8 +120,9 @@ export default function ReportView() {
         }
         throw new Error(msg);
       }
-      const json = await res.json();
-      setResult({ ...json, fromMs, toMs });
+
+      const [report, history] = await Promise.all([reportRes.json(), historyRes.json()]);
+      setResult({ ...report, history, fromMs, toMs });
     } catch (e) {
       setError(
         e instanceof TypeError
@@ -135,6 +170,21 @@ export default function ReportView() {
     result && result.sampleCount > 0 && missing >= 2
       ? `Aralığın %${missing}'inde kayıt yok`
       : null;
+
+  const reportSeries = REPORT_SERIES.filter((s) => activeSeries.has(s.key));
+  const chartKeysWithData = new Set(
+    result?.history?.samples.flatMap((sample) =>
+      REPORT_SERIES.filter((s) => sample[s.key] !== undefined).map((s) => s.key)
+    ) ?? []
+  );
+
+  const toggleSeries = (key) =>
+    setActiveSeries((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   return (
     <section className="history">
@@ -202,7 +252,57 @@ export default function ReportView() {
           note="Rotasyon sayısı"
         />
       </div>
+
+      {result?.history && (
+        <div className="chart-card report-chart">
+          <Chart
+            title="Rotasyon Devri ve Wireline Winç"
+            samples={result.history.samples}
+            series={reportSeries}
+            fromMs={result.fromMs}
+            toMs={result.toMs}
+            sampleMs={result.history.sampleMs}
+            emptyHint="Grafikte göstermek için yukarıdan veri seçin."
+            controls={
+              <ReportSeriesPicker
+                active={activeSeries}
+                withData={chartKeysWithData}
+                onToggle={toggleSeries}
+              />
+            }
+          />
+        </div>
+      )}
     </section>
+  );
+}
+
+function ReportSeriesPicker({ active, withData, onToggle }) {
+  return (
+    <div className="cats report-series-picker">
+      <div className="cats-grid">
+        {REPORT_SERIES.map((series) => {
+          const on = active.has(series.key);
+          const empty = !withData.has(series.key);
+          return (
+            <button
+              key={series.key}
+              type="button"
+              className={`cat-chip ${on ? 'is-on' : ''} ${empty ? 'is-empty' : ''}`}
+              style={{ '--series': series.color }}
+              onClick={() => onToggle(series.key)}
+              disabled={empty}
+              aria-pressed={on}
+              title={empty ? `${series.label} — bu aralıkta veri yok` : series.label}
+            >
+              <i className="cat-dot" aria-hidden="true" />
+              <span className="cat-name">{series.label}</span>
+              <span className="cat-sign" aria-hidden="true">{on ? '×' : '+'}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
