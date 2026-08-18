@@ -75,11 +75,15 @@ export default function DataView({
       return isPlainObject ? value[f.key] : undefined;
     };
     const asNumber = (v) => (typeof v === 'number' ? v : v == null ? undefined : Number(v));
+    const displayValue = (f) => {
+      const numeric = asNumber(read(f));
+      return Number.isFinite(numeric) && f.divisor ? numeric / f.divisor : numeric;
+    };
 
     const gaugeItems = (catId) =>
       fieldsOf(catId, 'gauge')
         .filter((f) => matches(f.key, f.tr))
-        .map((f) => ({ ...f, current: asNumber(read(f)) }));
+        .map((f) => ({ ...f, current: displayValue(f) }));
 
     if (activeCategory === 'makine') {
       return [{ kind: 'gauge', items: gaugeItems('makine') }];

@@ -6,6 +6,7 @@ import RangePicker, {
   toLocalInput,
   validateRange,
 } from './RangePicker.jsx';
+import { ROTASYON_DEVIR_DIVISOR, ROTASYON_DEVIR_KEY } from '../config/fields.js';
 
 // "Sondaj Makine Raporu" sekmesi. Üstte tarih aralığı seçimi, altında özet
 // kartları.
@@ -51,10 +52,11 @@ const ICONS = {
 // Rapor grafiğinde alan seçici yoktur; bu iki seri her zaman birlikte çizilir.
 const REPORT_SERIES = [
   {
-    key: 'AuxData1',
+    key: ROTASYON_DEVIR_KEY,
     label: 'Rotasyon Devir',
     unit: 'devir',
     decimals: 2,
+    divisor: ROTASYON_DEVIR_DIVISOR,
     color: '#14b8a6',
   },
   {
@@ -239,7 +241,7 @@ export default function ReportView() {
         <ReportCard
           tone="amber"
           icon="hourglass"
-          label="Kayıp Zaman"
+          label="Verimsiz Zaman"
           hours={lost?.hours}
           minutes={lost?.minutes}
           note="Verimli çalışma dışındaki süre"
@@ -272,6 +274,20 @@ export default function ReportView() {
             }
           />
         </div>
+      )}
+
+      {result && (
+        <section className="report-warnings" aria-labelledby="report-warnings-title">
+          <div className="report-warnings-head">
+            <span className="report-warnings-icon" aria-hidden="true">!</span>
+            <h3 id="report-warnings-title">Uyarılar</h3>
+          </div>
+          {coverageWarn ? (
+            <p className="report-warning-item">{coverageWarn}</p>
+          ) : (
+            <p className="report-warnings-empty">Seçilen tarih aralığında uyarı bulunmuyor.</p>
+          )}
+        </section>
       )}
     </section>
   );

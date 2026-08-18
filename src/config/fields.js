@@ -25,6 +25,7 @@ const zones = (normalTo, warningTo, dangerTo) => [
 
 // "Rotasyon Devir" göstergesinin kaynağı.
 export const ROTASYON_DEVIR_KEY = 'AuxData1';
+export const ROTASYON_DEVIR_DIVISOR = 2;
 
 // Alanın değeri hangi pakette geliyor:
 //   'analog' -> resAnalogData (AnalogData1..16)
@@ -61,8 +62,9 @@ const MACHINE_FIELDS = [
     tr: 'Rotasyon Devir',
     unit: 'devir',
     min: 0,
-    max: 1300,
-    zones: zones(1250, 1280, 1300),
+    max: 650,
+    zones: zones(625, 640, 650),
+    divisor: ROTASYON_DEVIR_DIVISOR,
     source: 'data',
   },
   // Eşikler henüz teyit edilmedi; diğer göstergelerle aynı orana göre kondu.

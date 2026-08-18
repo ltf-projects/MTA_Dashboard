@@ -126,6 +126,7 @@ export default function HistoryView() {
               label: f.tr,
               unit: f.unit,
               decimals: f.decimals ?? 2,
+              divisor: f.divisor,
               color: COLOR_OF.get(f.key),
             })),
         };
@@ -339,9 +340,20 @@ export function Chart({
   emptyHint = 'Grafiğe eklemek için aşağıdan veri seçin.',
 }) {
   const hostRef = useRef(null);
+  const wrapRef = useRef(null);
+  const hoverRef = useRef(null);
   const chartRef = useRef(null);
+  const viewRef = useRef({ min: fromMs, max: toMs });
+  const rangeRef = useRef({ fromMs, toMs });
   const mode = useThemeMode();
   const palette = useMemo(() => readPalette(), [mode]);
+
+  // Yeni bir tarih aralığı yüklendiğinde görünüm sıfırlanır. Seri/tema gibi
+  // diğer güncellemelerdeyse kullanıcının yakınlaştırdığı pencere korunur.
+  if (rangeRef.current.fromMs !== fromMs || rangeRef.current.toMs !== toMs) {
+    rangeRef.current = { fromMs, toMs };
+    viewRef.current = { min: fromMs, max: toMs };
+  }
 
   // Çizginin nerede kopacağını belirleyen eşik. Köprü aralığı ~1200 noktaya
   // seyrelttiği için ardışık örnekler arasındaki mesafe, ham örnekleme
@@ -373,17 +385,29 @@ export function Chart({
       let prevT = null;
       for (const row of samples) {
         const t = Date.parse(row.t);
-        const v = Number(row[s.key]);
-        if (!Number.isFinite(t) || !Number.isFinite(v)) continue;
+        if (!Number.isFinite(t)) continue;
         if (prevT !== null && t - prevT > gapMs) data.push([prevT + 1, null]);
-        data.push([t, v]);
+        const raw = row[s.key];
+        const v = raw === null || raw === undefined ? NaN : Number(raw);
+        // Bütün seriler aynı zaman noktalarını taşımalı. Aksi hâlde ApexCharts
+        // ortak tooltip'i bir seriden diğerine geçerken kapatabiliyor. Eksik
+        // ölçümü atlamak yerine null olarak tutarak zaman eksenini hizalıyoruz.
+        data.push([
+          t,
+          Number.isFinite(v) ? (s.divisor ? v / s.divisor : v) : null,
+        ]);
         prevT = t;
       }
       return { name: s.label, data };
     });
   }, [samples, series, gapMs]);
 
-  const hasData = apexSeries.some((s) => s.data.length > 0);
+  const hasData = apexSeries.some((s) => s.data.some(([, value]) => value !== null));
+
+  // İmleç katmanı (aşağıdaki efekt) yalnızca bir kez kurulur; o yüzden güncel
+  // seriyi state yerine ref üzerinden okur. Her çizimde tazelenir.
+  const hoverData = useRef([]);
+  hoverData.current = series.map((s, i) => ({ ...s, points: apexSeries[i]?.data ?? [] }));
 
   // Eksenin alt/üst sınırı ve kaç çizgi çizileceği. ApexCharts kendi başına
   // ölçeklerse durakları veri aralığını eşit bölerek seçiyor ve 2,16 / 30,6
@@ -425,6 +449,22 @@ export function Chart({
         locales: [TR_LOCALE],
         defaultLocale: 'tr',
         animations: { enabled: false },
+        events: {
+          zoomed: (_chart, { xaxis }) => {
+            if (Number.isFinite(xaxis?.min) && Number.isFinite(xaxis?.max)) {
+              viewRef.current = { min: xaxis.min, max: xaxis.max };
+            }
+          },
+          scrolled: (_chart, { xaxis }) => {
+            if (Number.isFinite(xaxis?.min) && Number.isFinite(xaxis?.max)) {
+              viewRef.current = { min: xaxis.min, max: xaxis.max };
+            }
+          },
+          beforeResetZoom: () => {
+            viewRef.current = { min: fromMs, max: toMs };
+            return { xaxis: { min: fromMs, max: toMs } };
+          },
+        },
         // Yakınlaştırınca eksen görünen veriye göre yeniden ölçeklenir;
         // doğrusal eksende küçük değerlere yakınlaşmanın tek yolu bu.
         // Yeni sınırların yine yuvarlak sayılara oturmasını forceNiceScale
@@ -447,9 +487,14 @@ export function Chart({
       theme: { mode },
       colors: series.map((s) => s.color),
       stroke: { curve: 'straight', width: 2 },
-      // Nokta göstermek yoğun seride grafiği okunmaz yapıyor; yalnızca
-      // imleç bir seriye değdiğinde o noktayı büyütüyoruz.
-      markers: { size: 0, hover: { size: 4 } },
+      // Nokta göstermek yoğun seride grafiği okunmaz yapıyor. İmlecin
+      // yakaladığı noktayı kendi katmanımız işaretlediği için kütüphanenin
+      // hover noktası da kapalı.
+      markers: {
+        size: 0,
+        strokeWidth: 2,
+        hover: { size: 0, sizeOffset: 0 },
+      },
       dataLabels: { enabled: false },
       legend: { show: false },
       grid: {
@@ -469,8 +514,8 @@ export function Chart({
           datetimeUTC: false,
           style: { fontSize: '11px', fontWeight: 600, colors: palette.axis },
         },
-        crosshairs: { stroke: { color: palette.axis, width: 1, dashArray: 4 } },
-        tooltip: { enabled: true },
+        crosshairs: { show: false },
+        tooltip: { enabled: false },
       },
       yaxis: {
         title: {
@@ -486,19 +531,13 @@ export function Chart({
           formatter: (v) => formatAxisValue(v),
         },
       },
-      tooltip: {
-        shared: false,
-        intersect: false,
-        theme: mode,
-        x: { format: 'dd MMM HH:mm' },
-        y: {
-          formatter: (v, ctx) => {
-            if (v === null || v === undefined) return '';
-            const s = series[ctx?.seriesIndex] ?? {};
-            return `${formatNum(v, s.decimals ?? 2)}${s.unit ? ` ${s.unit}` : ''}`;
-          },
-        },
-      },
+      // Bilgi kutusunu, kılavuz çizgisini ve nokta işaretini kendimiz
+      // çiziyoruz (bkz. imleç katmanı efekti). Kütüphaneninki kapalı çünkü:
+      // yakaladığı serinin o andaki değeri null ise kutuyu tamamen gizliyor —
+      // veri boşlukları ve eksik ölçümler yüzünden kutu sürekli kayboluyordu —
+      // ve en yakın seriyi ararken null'ları eleyip dizinleri kaydırdığı için
+      // imlecin üzerinde durmadığı bir çizgiyi gösterebiliyordu.
+      tooltip: { enabled: false },
       noData: { text: '' },
     }),
     [series, fromMs, toMs, mode, palette, yBounds.min, yBounds.max, yBounds.tickAmount]
@@ -527,7 +566,15 @@ export function Chart({
   const mounted = useRef(false);
   useEffect(() => {
     if (!mounted.current) return;
-    chartRef.current?.updateOptions(options, false, false);
+    const view = viewRef.current;
+    chartRef.current?.updateOptions(
+      {
+        ...options,
+        xaxis: { ...options.xaxis, min: view.min, max: view.max },
+      },
+      false,
+      false
+    );
   }, [options]);
 
   useEffect(() => {
@@ -535,12 +582,125 @@ export function Chart({
       mounted.current = true;
       return;
     }
-    chartRef.current?.updateSeries(apexSeries, false);
+    const chart = chartRef.current;
+    const view = viewRef.current;
+    chart?.updateSeries(apexSeries, false).then(() => chart.zoomX(view.min, view.max));
   }, [apexSeries]);
+
+  // İmleç katmanı: fare grafiğin çizim alanındayken, imlece piksel olarak en
+  // yakın NOKTA hangi seriye aitse yalnızca onun kutusu gösterilir. Kutu fare
+  // çizim alanından çıkana kadar ekranda kalır; iki nokta arasında kalmak,
+  // veri boşluğunun üzerinde durmak ya da başka bir serinin o anda eksik olması
+  // kutuyu kapatmaz. Ölçek bilgisi (minX/maxX/minY/maxY) grafiğin kendisinden
+  // okunur, böylece yakınlaştırma ve kaydırmadan sonra da doğru yeri gösterir.
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    const hover = hoverRef.current;
+    if (!wrap || !hover) return undefined;
+
+    const line = hover.querySelector('.chart-hover-line');
+    const dot = hover.querySelector('.chart-hover-dot');
+    const tip = hover.querySelector('.chart-tip');
+    const tipTime = hover.querySelector('.chart-tip-time');
+    const tipSwatch = hover.querySelector('.chart-tip-swatch');
+    const tipLabel = hover.querySelector('.chart-tip-label');
+    const tipValue = hover.querySelector('.chart-tip-value');
+
+    const hide = () => hover.classList.remove('is-on');
+
+    const onMove = (e) => {
+      const g = chartRef.current?.w?.globals;
+      const grid = wrap.querySelector('.apexcharts-grid');
+      const cols = hoverData.current;
+      if (!g || !grid || cols.length === 0) return hide();
+
+      const gr = grid.getBoundingClientRect();
+      const xSpan = g.maxX - g.minX;
+      const ySpan = g.maxY - g.minY;
+      if (!(gr.width > 0 && gr.height > 0 && xSpan > 0 && ySpan > 0)) return hide();
+
+      // Fare konumu tam sayı, çizim alanının kenarları ise ondalıklı; kenarda
+      // yarım piksellik bir taşma kutuyu kapatmasın diye küçük bir pay var.
+      const edge = 2;
+      const px = e.clientX - gr.left;
+      const py = e.clientY - gr.top;
+      if (px < -edge || py < -edge || px > gr.width + edge || py > gr.height + edge) return hide();
+
+      const xPx = (t) => ((t - g.minX) / xSpan) * gr.width;
+      const yPx = (v) => gr.height - ((v - g.minY) / ySpan) * gr.height;
+
+      // İmlecin zamanına en yakın noktadan başlayıp her seride sağa ve sola
+      // doğru ilk DOLU noktayı arıyoruz: boşluk için konan null noktalar
+      // seçilmez, çizgisi o anda kopuk olan seri de yarışın dışında kalmaz.
+      const hoverT = g.minX + (px / gr.width) * xSpan;
+      let best = null;
+      for (const col of cols) {
+        const pts = col.points;
+        if (pts.length === 0) continue;
+        const k = nearestIndex(pts, hoverT);
+        for (let step = -1; step <= 1; step += 2) {
+          let i = step < 0 ? k : k + 1;
+          while (i >= 0 && i < pts.length && pts[i][1] === null) i += step;
+          if (i < 0 || i >= pts.length) continue;
+          const [t, v] = pts[i];
+          const d = Math.hypot(xPx(t) - px, yPx(v) - py);
+          if (!best || d < best.d) best = { d, col, t, v };
+        }
+      }
+      if (!best) return hide();
+
+      const wr = wrap.getBoundingClientRect();
+      const cx = gr.left - wr.left + xPx(best.t);
+      const cy = gr.top - wr.top + yPx(best.v);
+      line.style.transform = `translateX(${cx}px)`;
+      line.style.top = `${gr.top - wr.top}px`;
+      line.style.height = `${gr.height}px`;
+      dot.style.transform = `translate(${cx}px, ${cy}px)`;
+      dot.style.background = best.col.color;
+
+      tipTime.textContent = formatTipStamp(best.t);
+      tipSwatch.style.background = best.col.color;
+      tipLabel.textContent = best.col.label;
+      tipValue.textContent = `${formatNum(best.v, best.col.decimals ?? 2)}${
+        best.col.unit ? ` ${best.col.unit}` : ''
+      }`;
+      hover.classList.add('is-on');
+
+      // Kutu imleci takip eder; kenara dayanınca imlecin diğer yanına geçer.
+      const gap = 16;
+      let tx = e.clientX - wr.left + gap;
+      let ty = e.clientY - wr.top + gap;
+      if (tx + tip.offsetWidth > wr.width) tx = e.clientX - wr.left - tip.offsetWidth - gap;
+      if (ty + tip.offsetHeight > wr.height) ty = e.clientY - wr.top - tip.offsetHeight - gap;
+      tip.style.transform = `translate(${Math.max(tx, 0)}px, ${Math.max(ty, 0)}px)`;
+      return undefined;
+    };
+
+    // Dokunmatikte parmak da imleç sayılır; onMove yalnızca clientX/clientY
+    // okuduğu için Touch nesnesi doğrudan verilebiliyor.
+    const onTouch = (e) => {
+      const touch = e.touches?.[0];
+      if (touch) onMove(touch);
+    };
+
+    wrap.addEventListener('mousemove', onMove);
+    wrap.addEventListener('mouseleave', hide);
+    wrap.addEventListener('touchmove', onTouch, { passive: true });
+    wrap.addEventListener('touchend', hide);
+    return () => {
+      wrap.removeEventListener('mousemove', onMove);
+      wrap.removeEventListener('mouseleave', hide);
+      wrap.removeEventListener('touchmove', onTouch);
+      wrap.removeEventListener('touchend', hide);
+    };
+  }, []);
 
   // Araç çubuğundaki ev simgesiyle aynı işi yapar; kart başlığındaki düğme
   // yakınlaştırma/kaydırmadan sonra seçilen aralığa dönmenin görünür yolu.
-  const resetView = () => chartRef.current?.zoomX(fromMs, toMs);
+  const resetView = () => {
+    viewRef.current = { min: fromMs, max: toMs };
+    chartRef.current?.zoomX(fromMs, toMs);
+  };
 
   return (
     <>
@@ -563,7 +723,25 @@ export function Chart({
 
       {controls}
 
-      <div className="chart-plot" ref={hostRef} />
+      <div className="chart-plot" ref={wrapRef}>
+        <div className="chart-plot-canvas" ref={hostRef} />
+
+        {/* İmleç katmanı. İçerik ve konum yukarıdaki efektte doğrudan DOM
+            üzerinden güncellenir; her fare hareketinde React çizimi tetiklemek
+            gereksiz pahalı olurdu. */}
+        <div className="chart-hover" ref={hoverRef} aria-hidden="true">
+          <span className="chart-hover-line" />
+          <span className="chart-hover-dot" />
+          <div className="chart-tip">
+            <div className="chart-tip-time" />
+            <div className="chart-tip-row">
+              <span className="chart-tip-swatch" />
+              <span className="chart-tip-label" />
+              <span className="chart-tip-value" />
+            </div>
+          </div>
+        </div>
+      </div>
 
       {series.length === 0 && (
         <p className="chart-hint">{emptyHint}</p>
@@ -581,6 +759,32 @@ function formatNum(v, decimals = 2) {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
+}
+
+// İmleç kutusundaki zaman. Saniye de yazılır: iki örnek arasındaki fark
+// çoğu zaman saniyelerle ölçülür, dakika hassasiyeti ayırt etmeye yetmez.
+function formatTipStamp(ms) {
+  return new Date(ms).toLocaleString('tr-TR', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+// Zamanı verilen noktaya en yakın dizin. Noktalar zaman sırasında olduğu için
+// ikili arama yeter; her fare hareketinde bütün seriler taranıyor.
+function nearestIndex(pts, t) {
+  let lo = 0;
+  let hi = pts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (pts[mid][0] < t) lo = mid + 1;
+    else hi = mid;
+  }
+  if (lo > 0 && Math.abs(pts[lo - 1][0] - t) < Math.abs(pts[lo][0] - t)) return lo - 1;
+  return lo;
 }
 
 function formatStamp(ms) {
