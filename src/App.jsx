@@ -9,6 +9,7 @@ import ThemePicker from './components/ThemePicker.jsx';
 // "Veri Yok" olarak gösterilir.
 const STALE_MS = 15000;
 
+//app
 export default function App() {
   const [tab, setTab] = useState('veriler'); // 'veriler' | 'konum'
   const [conn, setConn] = useState({ connected: false, error: null });
