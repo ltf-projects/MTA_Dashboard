@@ -52,19 +52,22 @@ export default function DataView({
 
   // Aktif sekmenin bölümleri: her biri arama sonrası boşsa gizlenir.
   const sections = useMemo(() => {
-    const read = (key) => {
-      if (!key) return undefined;
-      if (activeCategory === 'makine') {
-        return hasAnalogData ? resAnalogData[key] : undefined;
+    // Değerin hangi pakette geldiğini alanın kendi `source` bilgisi söyler;
+    // böylece Rotasyon Devir gibi ana pakette gelen bir alan Makine Verileri
+    // sekmesinde de doğru okunur.
+    const read = (f) => {
+      if (!f?.key) return undefined;
+      if (f.source === 'analog') {
+        return hasAnalogData ? resAnalogData[f.key] : undefined;
       }
-      return isPlainObject ? value[key] : undefined;
+      return isPlainObject ? value[f.key] : undefined;
     };
     const asNumber = (v) => (typeof v === 'number' ? v : v == null ? undefined : Number(v));
 
     const gaugeItems = (catId) =>
       fieldsOf(catId, 'gauge')
         .filter((f) => matches(f.key, f.tr))
-        .map((f) => ({ ...f, current: asNumber(read(f.key)) }));
+        .map((f) => ({ ...f, current: asNumber(read(f)) }));
 
     if (activeCategory === 'makine') {
       return [{ kind: 'gauge', items: gaugeItems('makine') }];
@@ -75,7 +78,7 @@ export default function DataView({
           kind: 'stat',
           items: fieldsOf('motor', 'stat')
             .filter((f) => matches(f.key, f.tr))
-            .map((f) => ({ ...f, current: asNumber(read(f.key)) })),
+            .map((f) => ({ ...f, current: asNumber(read(f)) })),
         },
         { kind: 'gauge', items: gaugeItems('motor') },
       ];
@@ -87,7 +90,7 @@ export default function DataView({
           kind: 'digital',
           items: fieldsOf('dijital', 'digital')
             .filter((f) => matches(f.key, f.tr))
-            .map((f) => ({ ...f, current: read(f.key) })),
+            .map((f) => ({ ...f, current: read(f) })),
         },
       ];
     }

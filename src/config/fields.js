@@ -26,6 +26,12 @@ const zones = (normalTo, warningTo, dangerTo) => [
 // "Rotasyon Devir" göstergesinin kaynağı.
 export const ROTASYON_DEVIR_KEY = 'AuxData1';
 
+// Alanın değeri hangi pakette geliyor:
+//   'analog' -> resAnalogData (AnalogData1..16)
+//   'data'   -> resData (CAN_*, AuxData*)
+// Sekme değil alan belirler; böylece bir alan başka sekmeye taşınsa da doğru
+// paketten okunur.
+
 export const CATEGORIES = [
   { id: 'makine', title: 'Makine Verileri' },
   { id: 'motor', title: 'Motor Verileri' },
@@ -54,7 +60,18 @@ const MACHINE_FIELDS = [
   { key: 'AnalogData14', tr: 'Makine Pitch', min: -90, max: 90, zones: zones(55, 70, 90) },
   { key: 'AnalogData15', tr: 'Kule Roll', min: -90, max: 90, zones: zones(55, 70, 90) },
   { key: 'AnalogData16', tr: 'Kule Pitch', min: -90, max: 90, zones: zones(55, 70, 90) },
-].map((f) => ({ unit: '', decimals: 2, ...f, category: 'makine', kind: 'gauge' }));
+  // Rotasyon Devir "Dijital Makine Verileri"nden buraya taşındı; değeri analog
+  // pakette değil ana pakette (AuxData1) geldiği için kaynağı ayrıca yazılır.
+  {
+    key: ROTASYON_DEVIR_KEY,
+    tr: 'Rotasyon Devir',
+    unit: 'devir',
+    min: 0,
+    max: 1300,
+    zones: zones(1250, 1280, 1300),
+    source: 'data',
+  },
+].map((f) => ({ unit: '', decimals: 2, source: 'analog', ...f, category: 'makine', kind: 'gauge' }));
 
 // --- Motor Verileri: göstergelerin üstündeki özet kartları ----------------
 const MOTOR_STATS = [
@@ -82,7 +99,7 @@ const MOTOR_STATS = [
     icon: 'clock',
     tone: 'ember',
   },
-].map((f) => ({ ...f, category: 'motor', kind: 'stat' }));
+].map((f) => ({ source: 'data', ...f, category: 'motor', kind: 'stat' }));
 
 // --- Motor Verileri: radyal göstergeler -----------------------------------
 const MOTOR_GAUGES = [
@@ -93,18 +110,10 @@ const MOTOR_GAUGES = [
   { key: 'CAN_Fuel_Level_1', tr: 'Yakıt Seviyesi 1', unit: '%', min: 0, max: 100, zones: zones(70, 85, 100) },
   { key: 'CAN_Fuel_Level_2', tr: 'Yakıt Seviyesi 2', unit: '%', min: 0, max: 100, zones: zones(70, 85, 100) },
   { key: 'CAN_Engine_Fuel_Temperature', tr: 'Mazot Sıcaklığı', unit: '°C', min: 0, max: 220, zones: zones(200, 212, 220) },
-].map((f) => ({ ...f, category: 'motor', kind: 'gauge', decimals: 2 }));
+].map((f) => ({ source: 'data', ...f, category: 'motor', kind: 'gauge', decimals: 2 }));
 
 // --- Dijital Makine Verileri: radyal göstergeler --------------------------
 const DIGITAL_GAUGES = [
-  {
-    key: ROTASYON_DEVIR_KEY,
-    tr: 'Rotasyon Devir',
-    unit: 'devir',
-    min: 0,
-    max: 1300,
-    zones: zones(1250, 1280, 1300),
-  },
   {
     key: 'AuxData2',
     tr: 'SPT Vuruş',
@@ -117,7 +126,7 @@ const DIGITAL_GAUGES = [
       { to: 50, level: 'warning' },
     ],
   },
-].map((f) => ({ ...f, category: 'dijital', kind: 'gauge', decimals: 2 }));
+].map((f) => ({ source: 'data', ...f, category: 'dijital', kind: 'gauge', decimals: 2 }));
 
 // --- Dijital Makine Verileri: durum kutucukları ---------------------------
 const DIGITAL_BOXES = [
@@ -127,7 +136,7 @@ const DIGITAL_BOXES = [
   { key: 'AuxData6', tr: 'Hidrolik Seviye' },
   { key: 'AuxData7', tr: 'Acil Stop' },
   { key: 'AuxData8', tr: 'Morsed Yağlama' },
-].map((f) => ({ ...f, category: 'dijital', kind: 'digital', unit: '', decimals: 0 }));
+].map((f) => ({ source: 'data', ...f, category: 'dijital', kind: 'digital', unit: '', decimals: 0 }));
 
 export const FIELDS = [
   ...MACHINE_FIELDS,
