@@ -97,6 +97,18 @@ const historySampleMs = Math.max(Number(HISTORY_SAMPLE_MS) || 5000, 250);
 
 const TABLE = 'sondaj_ornekleri';
 const FIELD_KEYS = [...new Set(FIELDS.filter((f) => f.key).map((f) => f.key))];
+// Motorun ömür boyu çalışma saati: kümülatif sayaç, /report bunun farkını alır.
+const ENGINE_HOURS_KEY = 'CAN_Engine_Total_Hours_Of_Operation';
+// Motor devri: sıfır olan örnekler motorun durduğu anları işaretler.
+const ENGINE_SPEED_KEY = 'CAN_Engine_Speed';
+// Rotasyon devrinin gerçek çalışma bandına çıktığı her ayrı blok bir manevra
+// sayılır. Düşük devirdeki sensör gürültüsü/boşta dönüş sayılmasın; blok
+// içindeki kısa veri düşüşleri ve kararsız başlangıç sıçramaları da ikinci bir
+// manevra üretmesin. Beş dakikadan uzun süre çalışma bandına dönülmezse yeni
+// bir rotasyon bloğu başlamış kabul edilir.
+const ROTATION_SPEED_KEY = 'AuxData1';
+const ROTATION_ACTIVE_RPM = 500;
+const ROTATION_RESTART_GAP_SEC = 5 * 60;
 // Alan adları büyük/küçük harf karışık (AnalogData1); Postgres tırnaksız
 // tanımlayıcıları küçük harfe indirdiği için her yerde tırnaklanır.
 const q = (name) => `"${name.replace(/"/g, '""')}"`;
@@ -218,27 +230,42 @@ app.get('/health', (_req, res) =>
 // Seyreltme veritabanında yapılır: aralıktaki satırlar numaralandırılır ve
 // her `adim`inci satır alınır. Satır sayısı `points`in altındaysa adım 1
 // olur, yani hiçbir örnek kaybolmaz.
-app.get('/history', async (req, res) => {
-  const { from, to, keys, points } = req.query;
+// Geçmişe bakan uçların ortak girişi: tarihleri doğrular, veritabanı hazır
+// değilse sebebini söyler. Sorun varsa yanıtı kendisi yazar ve null döner.
+function readRange(req, res) {
+  const { from, to } = req.query;
 
   const fromMs = from ? Date.parse(String(from)) : NaN;
   const toMs = to ? Date.parse(String(to)) : NaN;
   if (Number.isNaN(fromMs) || Number.isNaN(toMs)) {
-    return res.status(400).json({ error: 'Geçersiz tarih biçimi (ISO 8601 bekleniyor).' });
+    res.status(400).json({ error: 'Geçersiz tarih biçimi (ISO 8601 bekleniyor).' });
+    return null;
   }
   if (fromMs > toMs) {
-    return res.status(400).json({ error: 'Başlangıç, bitişten sonra olamaz.' });
+    res.status(400).json({ error: 'Başlangıç, bitişten sonra olamaz.' });
+    return null;
   }
   if (!historyEnabled) {
-    return res.status(503).json({
+    res.status(503).json({
       error: 'Geçmiş kaydı kapalı: köprüde DATABASE_URL tanımlı değil.',
     });
+    return null;
   }
   if (!dbReady) {
-    return res.status(503).json({
+    res.status(503).json({
       error: `Veritabanına bağlanılamıyor${dbError ? ` (${dbError})` : ''}.`,
     });
+    return null;
   }
+  return { fromMs, toMs };
+}
+
+app.get('/history', async (req, res) => {
+  const { keys, points } = req.query;
+
+  const range = readRange(req, res);
+  if (!range) return;
+  const { fromMs, toMs } = range;
 
   // Yalnızca tanıdığımız sütunlar sorgulanır — istek gövdesinden gelen ad
   // doğrudan SQL'e girmesin.
@@ -294,6 +321,164 @@ app.get('/history', async (req, res) => {
     dbError = e.message;
     console.error('[KÖPRÜ] Geçmiş okuma hatası:', e.message);
     res.status(500).json({ error: `Geçmiş okunamadı: ${e.message}` });
+  }
+});
+
+// GET /report?from=<ISO>&to=<ISO>
+//
+// "Sondaj Makine Raporu" sekmesinin özeti.
+//
+// Motorun çalışma süresi iki yoldan biriyle bulunur:
+//
+//  1. Sayaç farkı (varsayılan): kümülatif sayaç alanının aralık başındaki ve
+//     sonundaki değerlerinin farkı. Sayaç yalnızca motor çalışırken ilerler,
+//     bu yüzden kayıt boşlukları sonucu bozmaz — sayaç makinenin kendisinde
+//     işlemeye devam eder. Tek eksiği çözünürlüğü: sayaç 0,05 saat (3 dakika)
+//     adımlarla arttığı için sonuç ±3 dakika oynayabilir.
+//
+//  2. Kesintisiz çalışma: kayıtlar aralığın başından sonuna kadar eksiksizse
+//     ve içlerinde motor devrinin sıfır olduğu tek bir örnek bile yoksa,
+//     motor bütün pencere boyunca çalışmış demektir; süre doğrudan kayıt
+//     penceresinin uzunluğudur. Böylece 3 dakikalık yuvarlama kaybolur.
+//
+// İkinci yol yalnızca kapsam tamken uygulanır: kayıt eksikse "hiç durmamış"
+// bilgisi yalnızca elimizdeki örnekler için doğrudur, boşlukta ne olduğunu
+// bilemeyiz — orada sayaç farkı esastır.
+const REPORT_EDGE_TOLERANCE_SEC = 60;
+const REPORT_GAP_SEC = 60;
+
+app.get('/report', async (req, res) => {
+  const range = readRange(req, res);
+  if (!range) return;
+  const { fromMs, toMs } = range;
+
+  try {
+    const { rows } = await pool.query(
+      `
+      WITH veri AS (
+        SELECT zaman,
+               ${q(ENGINE_HOURS_KEY)} AS motor_saat,
+               ${q(ENGINE_SPEED_KEY)} AS devir,
+               ${q(ROTATION_SPEED_KEY)} AS rotasyon
+        FROM ${TABLE}
+        WHERE box_id = $1 AND zaman >= $2 AND zaman <= $3
+      ),
+      adim AS (
+        SELECT *,
+               EXTRACT(EPOCH FROM (zaman - lag(zaman) OVER (ORDER BY zaman))) AS aralik_sn
+        FROM veri
+      ),
+      aktif_rotasyon AS (
+        SELECT zaman,
+               lag(zaman) OVER (ORDER BY zaman) AS onceki_aktif_zaman
+        FROM veri
+        WHERE rotasyon >= $5
+      ),
+      rotasyon_isaretli AS (
+        SELECT zaman,
+               CASE
+                 WHEN onceki_aktif_zaman IS NULL
+                   OR EXTRACT(EPOCH FROM (zaman - onceki_aktif_zaman)) > $6
+                 THEN 1 ELSE 0
+               END AS yeni_manevra
+        FROM aktif_rotasyon
+      ),
+      rotasyon_gruplu AS (
+        SELECT zaman,
+               sum(yeni_manevra) OVER (ORDER BY zaman) AS manevra_no
+        FROM rotasyon_isaretli
+      ),
+      rotasyon_ozet AS (
+        SELECT manevra_no, min(zaman) AS baslangic, max(zaman) AS bitis
+        FROM rotasyon_gruplu
+        GROUP BY manevra_no
+      )
+      SELECT
+        count(*)::int AS adet,
+        min(zaman) AS ilk_zaman,
+        max(zaman) AS son_zaman,
+        count(*) FILTER (WHERE devir IS NOT NULL)::int AS devirli_adet,
+        count(*) FILTER (WHERE devir = 0)::int AS durus_adet,
+        count(*) FILTER (WHERE aralik_sn > $4)::int AS bosluk_adet,
+        coalesce(sum(aralik_sn) FILTER (WHERE aralik_sn > $4), 0) AS bosluk_sn,
+        (SELECT count(*)::int FROM rotasyon_ozet) AS manevra_adet,
+        (SELECT coalesce(sum(EXTRACT(EPOCH FROM (bitis - baslangic))), 0)
+         FROM rotasyon_ozet) AS verimli_saniye,
+        (SELECT motor_saat FROM veri WHERE motor_saat IS NOT NULL ORDER BY zaman ASC LIMIT 1) AS ilk_saat,
+        (SELECT motor_saat FROM veri WHERE motor_saat IS NOT NULL ORDER BY zaman DESC LIMIT 1) AS son_saat
+      FROM adim
+      `,
+      [
+        boxId,
+        new Date(fromMs),
+        new Date(toMs),
+        REPORT_GAP_SEC,
+        ROTATION_ACTIVE_RPM,
+        ROTATION_RESTART_GAP_SEC,
+      ]
+    );
+
+    const r = rows[0];
+    const hasData = r.adet > 0;
+    const first = r.ilk_saat === null ? null : Number(r.ilk_saat);
+    const last = r.son_saat === null ? null : Number(r.son_saat);
+
+    const firstAtMs = hasData ? r.ilk_zaman.getTime() : null;
+    const lastAtMs = hasData ? r.son_zaman.getTime() : null;
+    const gapSec = Number(r.bosluk_sn) || 0;
+    const efficientSeconds = Number(r.verimli_saniye) || 0;
+
+    // Kayıtların aralığı ne kadar kapladığı: uçlardaki eksikler ve aradaki
+    // boşluklar düşülür.
+    const windowSec = (toMs - fromMs) / 1000;
+    const coveredSec = hasData
+      ? Math.max(0, (lastAtMs - firstAtMs) / 1000 - gapSec)
+      : 0;
+    const coverageRatio = windowSec > 0 ? Math.min(1, coveredSec / windowSec) : 0;
+
+    // Kapsam tam mı: kayıtlar pencerenin iki ucuna da yetişiyor ve arada
+    // kopukluk yok.
+    const edgesOk =
+      hasData &&
+      (firstAtMs - fromMs) / 1000 <= REPORT_EDGE_TOLERANCE_SEC &&
+      (toMs - lastAtMs) / 1000 <= REPORT_EDGE_TOLERANCE_SEC;
+    const complete = edgesOk && r.bosluk_adet === 0;
+    const nonstop = complete && r.devirli_adet > 0 && r.durus_adet === 0;
+
+    const counterHours =
+      first !== null && last !== null ? Math.max(0, last - first) : null;
+    const nonstopHours = hasData ? (lastAtMs - firstAtMs) / 3600000 : null;
+
+    const engineHours = nonstop ? nonstopHours : counterHours;
+
+    res.json({
+      from: new Date(fromMs).toISOString(),
+      to: new Date(toMs).toISOString(),
+      sampleCount: r.adet,
+      coverage: hasData
+        ? {
+            from: r.ilk_zaman.toISOString(),
+            to: r.son_zaman.toISOString(),
+            ratio: coverageRatio,
+            complete,
+            gapCount: r.bosluk_adet,
+            gapSeconds: gapSec,
+          }
+        : null,
+      engineHours,
+      // Hangi yolla bulunduğu arayüzde gizlense de tanı için önemli.
+      engineHoursMethod: engineHours === null ? null : nonstop ? 'nonstop' : 'counter',
+      engineCounter: first !== null && last !== null ? { first, last } : null,
+      idleSamples: r.durus_adet,
+      speedSamples: r.devirli_adet,
+      maneuverCount: r.manevra_adet,
+      efficientHours: efficientSeconds / 3600,
+      lostHours: Math.max(0, (toMs - fromMs) / 3600000 - efficientSeconds / 3600),
+    });
+  } catch (e) {
+    dbError = e.message;
+    console.error('[KÖPRÜ] Rapor okuma hatası:', e.message);
+    res.status(500).json({ error: `Rapor hesaplanamadı: ${e.message}` });
   }
 });
 

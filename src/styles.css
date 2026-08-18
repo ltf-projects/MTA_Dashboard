@@ -1333,29 +1333,90 @@ body {
 
 .empty { color: var(--text-faint); }
 
-/* Sondaj Makine Raporu: içerik gelene kadar sekmenin boş sayfası. */
-.report-placeholder {
+/* ---------- Sondaj Makine Raporu: özet kartları ---------- */
+/* Her kartın kendi tonu var; ton bir CSS değişkenine yazılır, kart içindeki
+   üst şerit, ikon ve birimler onu kullanır. */
+.report-cards {
+  display: grid;
+  /* Kart sayısı değiştikçe sütun sayısı kendiliğinden ayarlansın. */
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 18px;
+  margin-top: 22px;
+}
+@media (max-width: 560px) { .report-cards { grid-template-columns: minmax(0, 1fr); } }
+
+.report-card {
+  position: relative;
   display: flex;
   flex-direction: column;
+  gap: 10px;
+  padding: 22px 22px 20px;
+  background: linear-gradient(140deg, var(--card-from), var(--card-to));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+/* Kartın üstündeki ince renkli şerit. */
+.report-card::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 2px;
+  background: var(--report-tone);
+}
+.report-card--teal { --report-tone: #2dd4bf; --report-tone-rgb: 45, 212, 191; }
+.report-card--green { --report-tone: #3ecf8e; --report-tone-rgb: 62, 207, 142; }
+.report-card--blue { --report-tone: #38bdf8; --report-tone-rgb: 56, 189, 248; }
+.report-card--amber { --report-tone: #f5a524; --report-tone-rgb: 245, 165, 36; }
+.report-card--purple { --report-tone: #a78bfa; --report-tone-rgb: 167, 139, 250; }
+
+.report-card-icon {
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 320px;
-  padding: 48px 24px;
-  text-align: center;
-  background: var(--panel);
-  border: 1px dashed var(--border-strong);
-  border-radius: 18px;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: rgba(var(--report-tone-rgb), 0.14);
+  border: 1px solid rgba(var(--report-tone-rgb), 0.32);
 }
-.report-placeholder h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
+.report-card-icon svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: var(--report-tone);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.report-card-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+.report-card-value {
+  font-size: 30px;
+  font-weight: 800;
   color: var(--text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
 }
-.report-placeholder p {
-  margin: 0;
+/* Sayı ve birim aynı renkte kalır; renk vurgusu üst şerit ile ikonda durur,
+   böylece değer satırı alacalı görünmez. Birim yalnızca daha küçük ve soluk. */
+.report-card-unit {
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.report-card-note {
+  font-size: 13px;
   color: var(--text-faint);
+}
+/* Kayıt eksikse: değer yanıltıcı okunmasın diye kartın altında uyarı. */
+.report-card-warn {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--zone-warning);
 }
 
 /* ---------- Veri akışı durduğunda (15 sn) ---------- */

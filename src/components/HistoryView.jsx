@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ApexCharts from 'apexcharts';
 import { BRIDGE_URL } from '../socket.js';
 import { CATEGORIES, FIELDS } from '../config/fields.js';
+import RangePicker, { startOfToday, toLocalInput, validateRange } from './RangePicker.jsx';
 
 // "Geçmiş Grafik" sekmesi: köprüdeki /history ucundan seçilen tarih aralığını
 // bir kez çeker, ardından grafiğin altındaki kategori çipleriyle hangi
@@ -10,43 +11,6 @@ import { CATEGORIES, FIELDS } from '../config/fields.js';
 //
 // Geçmiş köprünün belleğinde tutulur (bkz. server.js). Köprü yeniden başlarsa
 // veya tampon dolarsa eski örnekler kaybolur.
-
-const MAX_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
-
-// Geçmiş bellekte tutulduğu için pratikte birkaç günden eskisi zaten yok;
-// yine de kullanıcı 1970 ya da 2099 gibi anlamsız tarihler seçemesin diye
-// seçilebilir pencere 30 günle sınırlanır. Üst sınır her zaman "şimdi"dir:
-// gelecekte ölçüm olamaz.
-const MAX_PAST_DAYS = 30;
-
-
-// Girdi ve mesajlar için tek doğrulama noktası; hem "Göster" düğmesinin
-// etkinliği hem de istek öncesi son kontrol buradan geçer.
-function validateRange(fromStr, toStr, nowMs) {
-  const fromMs = new Date(fromStr).getTime();
-  const toMs = new Date(toStr).getTime();
-  const floorMs = nowMs - MAX_PAST_DAYS * 24 * 60 * 60 * 1000;
-
-  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
-    return { error: 'Tarihler eksik ya da geçersiz. Lütfen iki tarihi de seçin.' };
-  }
-  if (fromMs > nowMs || toMs > nowMs) {
-    return { error: 'İleri bir tarih seçilemez — gelecekte ölçüm bulunmuyor.' };
-  }
-  if (fromMs < floorMs) {
-    return { error: `En fazla ${MAX_PAST_DAYS} gün öncesine kadar seçebilirsiniz.` };
-  }
-  if (fromMs === toMs) {
-    return { error: 'Başlangıç ile bitiş aynı olamaz.' };
-  }
-  if (fromMs > toMs) {
-    return { error: 'Başlangıç, bitişten sonra olamaz.' };
-  }
-  if (toMs - fromMs > MAX_RANGE_MS) {
-    return { error: 'En fazla 7 günlük aralık seçilebilir.' };
-  }
-  return { fromMs, toMs };
-}
 
 // Geçmiş yalnızca bu kategoriler için çizilir; her biri kendi grafiğini alır.
 // Dijital alanlar açık/kapalı durum taşıdığı için zaman serisinde anlamlı
@@ -68,17 +32,6 @@ const COLOR_OF = new Map(
   CHARTABLE.map((f, i) => [f.key, SERIES_COLORS[i % SERIES_COLORS.length]])
 );
 
-function toLocalInput(d) {
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-function startOfToday() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
 export default function HistoryView() {
   const [from, setFrom] = useState(() => toLocalInput(startOfToday()));
   const [to, setTo] = useState(() => toLocalInput(new Date()));
@@ -86,21 +39,6 @@ export default function HistoryView() {
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
   const [active, setActive] = useState(() => new Set());
-
-  // Üst sınır ("şimdi") ilerlesin diye dakikada bir tazelenir; yoksa sayfa
-  // uzun süre açık kalınca son dakikalar seçilemez hale gelirdi.
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now()), 30000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const check = validateRange(from, to, nowMs);
-  const invalid = Boolean(check.error);
-
-  // Tarayıcının kendi seçicisi de anlamsız tarihleri baştan engellesin.
-  const minInput = toLocalInput(new Date(nowMs - MAX_PAST_DAYS * 24 * 60 * 60 * 1000));
-  const maxInput = toLocalInput(new Date(nowMs));
 
   const load = useCallback(async () => {
     const { error: invalidMsg, fromMs, toMs } = validateRange(from, to, Date.now());
@@ -209,59 +147,16 @@ export default function HistoryView() {
 
   return (
     <section className="history">
-      <div className="history-panel">
-        <p className="history-panel-title">Görmek istediğiniz tarih aralığını seçin</p>
-        <p className="history-panel-note">En fazla 7 günlük aralık seçilebilir</p>
+      <RangePicker
+        from={from}
+        to={to}
+        onFromChange={setFrom}
+        onToChange={setTo}
+        onSubmit={load}
+        loading={loading}
+      />
 
-        <div className="history-controls">
-          <label className="history-field">
-            <span className="history-field-label">Başlangıç</span>
-            <input
-              type="datetime-local"
-              value={from}
-              min={minInput}
-              max={maxInput}
-              aria-invalid={invalid}
-              onChange={(e) => setFrom(e.target.value)}
-            />
-          </label>
-
-          <span className="history-arrow" aria-hidden="true">
-            →
-          </span>
-
-          <label className="history-field">
-            <span className="history-field-label">Bitiş</span>
-            <input
-              type="datetime-local"
-              value={to}
-              min={minInput}
-              max={maxInput}
-              aria-invalid={invalid}
-              onChange={(e) => setTo(e.target.value)}
-            />
-          </label>
-        </div>
-
-        {/* Seçim bozuksa istek atılmadan, anında söylenir. */}
-        {invalid && (
-          <p className="history-warn" role="alert">
-            {check.error}
-          </p>
-        )}
-
-        <button
-          type="button"
-          className="history-run"
-          onClick={load}
-          disabled={loading || invalid}
-          title={invalid ? check.error : 'Seçilen aralığı getir'}
-        >
-          {loading ? 'Yükleniyor…' : 'Göster'}
-        </button>
-      </div>
-
-      {error && !invalid && (
+      {error && (
         <p className="history-error" role="alert">
           {error}
         </p>
