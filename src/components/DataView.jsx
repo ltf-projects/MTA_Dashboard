@@ -100,15 +100,14 @@ export default function DataView({
       ];
     }
     if (activeCategory === 'dijital') {
-      return [
-        { kind: 'gauge', items: gaugeItems('dijital') },
-        {
-          kind: 'digital',
-          items: fieldsOf('dijital', 'digital')
-            .filter((f) => matches(f.key, f.tr))
-            .map((f) => ({ ...f, current: read(f) })),
-        },
-      ];
+      // Gösterge ile durum kutucukları yan yana çizildiği için tek bölüm
+      // hâlinde döner. `items` yalnızca "sonuç var mı" denetimi için birleşik
+      // listedir; çizim `gauges` ve `boxes` üzerinden yapılır.
+      const gauges = gaugeItems('dijital');
+      const boxes = fieldsOf('dijital', 'digital')
+        .filter((f) => matches(f.key, f.tr))
+        .map((f) => ({ ...f, current: read(f) }));
+      return [{ kind: 'dijital', items: [...gauges, ...boxes], gauges, boxes }];
     }
     return [];
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -234,12 +233,43 @@ export default function DataView({
             );
           }
 
-          if (section.kind === 'digital') {
+          if (section.kind === 'dijital') {
             return (
-              <div className="digital-grid" key={i}>
-                {section.items.map((f) => (
-                  <DigitalCard key={f.key} label={f.tr} value={f.current} stale={viewStale} />
-                ))}
+              <div key={i}>
+                <ZoneLegend items={section.gauges} />
+                <div className="digital-layout">
+                  {section.gauges.length > 0 && (
+                    <div className="digital-layout-gauge">
+                      {section.gauges.map((f) => (
+                        <Gauge
+                          key={f.tr}
+                          label={f.tr}
+                          value={f.current}
+                          unit={f.unit}
+                          min={f.min}
+                          max={f.max}
+                          zones={f.zones}
+                          decimals={f.decimals}
+                          tickDecimals={f.tickDecimals}
+                          stale={viewStale}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  {section.boxes.length > 0 && (
+                    <div className="digital-grid">
+                      {section.boxes.map((f) => (
+                        <DigitalCard
+                          key={f.key}
+                          label={f.tr}
+                          value={f.current}
+                          stale={viewStale}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             );
           }

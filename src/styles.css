@@ -1452,10 +1452,60 @@ body {
 }
 
 /* ---------- Dijital durum kutucukları ---------- */
-.digital-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+/* Dijital sekmesi: solda SPT Vuruş göstergesi, sağında durum kutucukları.
+   Tek gösterge olduğu için diğer sekmelerdeki 4 kolonlu ızgaranın kart
+   genişliğinden (~336px) daha geniş tutulur; kadran büyüdükçe ibre ve değer
+   okunaklı oluyor. Genişlik alana göre esner, ama alt/üst sınırla sabitlenir.
+   Kutucuklar kalan alanı ikiye böler — altı kutu üç satır olur. */
+.digital-layout {
+  display: flex;
+  align-items: flex-start;
   gap: 16px;
+}
+
+.digital-layout-gauge {
+  flex: 0 0 clamp(340px, 34%, 480px);
+  display: grid;
+  gap: 14px;
+}
+
+.digital-grid {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 1200px) {
+  /* Gösterge daralmak yerine kutucuklar tek kolona iner. */
+  .digital-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  /* Yan yana sığmıyor: gösterge üste, kutucuklar altına iner. */
+  .digital-layout {
+    flex-direction: column;
+  }
+
+  .digital-layout-gauge {
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: 420px;
+  }
+
+  .digital-grid {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .digital-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .digital-card {
