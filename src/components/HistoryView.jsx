@@ -23,10 +23,14 @@ const CHART_CATEGORIES = ['makine', 'motor'];
 const CHARTABLE = FIELDS.filter((f) => f.key && CHART_CATEGORIES.includes(f.category));
 
 // Seri renkleri. Bölge renklerinden (yeşil/sarı/kırmızı) ayrı tutulur, çünkü
-// burada renk "durum" değil "hangi alan" demektir. İki temada da okunur.
+// burada renk "durum" değil "hangi alan" demektir. Palet, aynı grafikteki
+// hiçbir seri aynı renge düşmeyecek ve komşu seriler kolay ayırt edilecek
+// şekilde sıralanmıştır. Özellikle Rotasyon Tork (4. renk) güçlü fuşyadır.
 const SERIES_COLORS = [
-  '#4f9cf9', '#3ecf8e', '#f5a524', '#f5576c', '#a78bfa', '#22d3ee',
-  '#fb923c', '#e879a9', '#84cc16', '#60a5fa', '#f43f5e', '#14b8a6',
+  '#0072B2', '#E69F00', '#009E73', '#E60049', '#56B4E9', '#D55E00',
+  '#7A44A6', '#F0E442', '#00A6A6', '#CC79A7', '#4D7C0F', '#2563EB',
+  '#C2410C', '#9333EA', '#15803D', '#DB2777', '#0891B2', '#A16207',
+  '#4F46E5', '#DC2626', '#0F766E', '#7E22CE', '#65A30D', '#EA580C',
 ];
 
 const COLOR_OF = new Map(

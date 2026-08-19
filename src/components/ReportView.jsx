@@ -58,14 +58,14 @@ const REPORT_SERIES = [
     unit: 'devir',
     decimals: 2,
     divisor: ROTASYON_DEVIR_DIVISOR,
-    color: '#14b8a6',
+    color: '#00A6A6',
   },
   {
     key: 'AnalogData7',
     label: 'Wireline Winç',
     unit: 'BAR',
     decimals: 2,
-    color: '#fb923c',
+    color: '#7A44A6',
   },
 ];
 
