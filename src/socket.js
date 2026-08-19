@@ -14,7 +14,23 @@ if (import.meta.env.PROD && !import.meta.env.VITE_BRIDGE_URL) {
   );
 }
 
+// autoConnect kapalı: bağlantı yalnızca oturum açıldıktan sonra, elde geçerli
+// bir Supabase erişim jetonu varken kurulur. Köprü jetonu doğrulamadan hiçbir
+// veri göndermez, yani giriş yapmayan kimse canlı veriyi göremez.
 export const socket = io(BRIDGE_URL, {
   transports: ['websocket', 'polling'],
   reconnection: true,
+  autoConnect: false,
 });
+
+// Jeton yenilendiğinde de çağrılır: socket.auth güncellenirse sonraki
+// yeniden bağlanma denemesi taze jetonla yapılır.
+export function connectSocket(accessToken) {
+  socket.auth = { token: accessToken };
+  if (!socket.connected) socket.connect();
+}
+
+export function disconnectSocket() {
+  socket.auth = {};
+  socket.disconnect();
+}

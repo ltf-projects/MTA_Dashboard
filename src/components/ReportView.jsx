@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BRIDGE_URL } from '../socket.js';
+import { bridgeFetch } from '../lib/api.js';
 import { Chart } from './HistoryView.jsx';
 import RangePicker, {
   startOfToday,
@@ -105,8 +106,8 @@ export default function ReportView() {
       historyUrl.searchParams.set('keys', REPORT_SERIES.map((s) => s.key).join(','));
 
       const [reportRes, historyRes] = await Promise.all([
-        fetch(reportUrl),
-        fetch(historyUrl),
+        bridgeFetch(reportUrl),
+        bridgeFetch(historyUrl),
       ]);
 
       for (const res of [reportRes, historyRes]) {

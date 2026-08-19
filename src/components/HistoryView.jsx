@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ApexCharts from 'apexcharts';
 import { BRIDGE_URL } from '../socket.js';
+import { bridgeFetch } from '../lib/api.js';
 import { CATEGORIES, FIELDS } from '../config/fields.js';
 import RangePicker, { startOfToday, toLocalInput, validateRange } from './RangePicker.jsx';
 
@@ -54,7 +55,7 @@ export default function HistoryView() {
       url.searchParams.set('from', new Date(fromMs).toISOString());
       url.searchParams.set('to', new Date(toMs).toISOString());
       url.searchParams.set('keys', CHARTABLE.map((f) => f.key).join(','));
-      const res = await fetch(url);
+      const res = await bridgeFetch(url);
       if (!res.ok) {
         // Köprü hatayı açıklıyorsa (veritabanı kapalı, bağlantı yok...) onu
         // olduğu gibi göster; genel bir mesajla üstünü örtme.

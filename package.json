@@ -15,6 +15,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
     "apexcharts": "^3.54.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

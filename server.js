@@ -50,6 +50,11 @@ const {
   DATABASE_URL = '',
   // Barındırılan Postgres'lerin çoğu TLS ister (Neon, Supabase, Railway...).
   DATABASE_SSL = 'false',
+  // --- Kimlik doğrulama (Supabase Auth) ---
+  // Arayüzün kullandığı projeyle AYNI olmalı; jetonlar bu projeye sorulur.
+  // İkisi de anon (genel) anahtardır, service_role anahtarı gerekmez.
+  SUPABASE_URL = '',
+  SUPABASE_ANON_KEY = '',
 } = process.env;
 
 const listenPort = Number(PORT || BRIDGE_PORT);
@@ -69,6 +74,88 @@ const app = express();
 app.use(cors({ origin: allowedOrigins }));
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, { cors: { origin: allowedOrigins } });
+
+// ---------------------------------------------------------------------------
+// KİMLİK DOĞRULAMA
+//
+// Köprü canlı makine verisi taşıyor; giriş yapmamış kimse buna erişememeli.
+// Hem Socket.IO el sıkışması hem de veri uçları (/history, /report) Supabase
+// erişim jetonu ister.
+//
+// Jeton, Supabase'in kendi /auth/v1/user ucuna sorularak doğrulanır. Böylece
+// JWT imza sırrını burada tutmak gerekmez; yalnızca genel anon anahtar yeter.
+// ---------------------------------------------------------------------------
+const authConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+
+if (!authConfigured) {
+  console.error(
+    '[KÖPRÜ] SUPABASE_URL / SUPABASE_ANON_KEY tanımlı değil. Kimlik doğrulanamadığı ' +
+      'için TÜM bağlantılar reddedilecek. .env dosyasını doldurup köprüyü yeniden başlatın.'
+  );
+}
+
+// Aynı jeton saniyede birkaç kez gelebilir (socket + iki fetch). Her seferinde
+// Supabase'e gitmemek için kısa ömürlü bir önbellek tutulur.
+const TOKEN_CACHE_MS = 60_000;
+const tokenCache = new Map();
+
+async function verifyToken(token) {
+  if (!authConfigured || !token) return null;
+
+  const cached = tokenCache.get(token);
+  if (cached && cached.expiresAt > Date.now()) return cached.user;
+
+  try {
+    const res = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/auth/v1/user`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      // Geçersiz jetonu da kısa süre hatırla: kopmuş bir istemci saniyede
+      // onlarca kez denerse Supabase'i yormasın.
+      tokenCache.set(token, { user: null, expiresAt: Date.now() + 10_000 });
+      return null;
+    }
+    const user = await res.json();
+    tokenCache.set(token, { user, expiresAt: Date.now() + TOKEN_CACHE_MS });
+    return user;
+  } catch (err) {
+    console.error('[KÖPRÜ] Jeton doğrulanamadı:', err.message);
+    return null;
+  }
+}
+
+// Önbellek sınırsız büyümesin: süresi geçmiş kayıtlar arada temizlenir.
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, entry] of tokenCache) {
+    if (entry.expiresAt <= now) tokenCache.delete(token);
+  }
+}, TOKEN_CACHE_MS).unref?.();
+
+// Socket.IO el sıkışması: istemci jetonu `auth.token` içinde gönderir.
+io.use(async (socket, next) => {
+  const token = socket.handshake.auth?.token;
+  const user = await verifyToken(token);
+  if (!user) {
+    next(new Error('Yetkisiz: geçerli bir oturum gerekiyor.'));
+    return;
+  }
+  socket.data.user = user;
+  next();
+});
+
+// Veri uçları için: Authorization: Bearer <jeton>
+async function requireAuth(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  const user = await verifyToken(token);
+  if (!user) {
+    res.status(401).json({ error: 'Yetkisiz: geçerli bir oturum gerekiyor.' });
+    return;
+  }
+  req.user = user;
+  next();
+}
 
 // Son bilinen değeri sakla; yeni bağlanan arayüze hemen gönderelim.
 const lastState = {
@@ -260,7 +347,7 @@ function readRange(req, res) {
   return { fromMs, toMs };
 }
 
-app.get('/history', async (req, res) => {
+app.get('/history', requireAuth, async (req, res) => {
   const { keys, points } = req.query;
 
   const range = readRange(req, res);
@@ -347,7 +434,7 @@ app.get('/history', async (req, res) => {
 const REPORT_EDGE_TOLERANCE_SEC = 60;
 const REPORT_GAP_SEC = 60;
 
-app.get('/report', async (req, res) => {
+app.get('/report', requireAuth, async (req, res) => {
   const range = readRange(req, res);
   if (!range) return;
   const { fromMs, toMs } = range;
@@ -578,7 +665,7 @@ client.on('message', (topic, payloadBuf) => {
 
 // --- Yeni arayüz bağlandığında son durumu gönder ---
 io.on('connection', (socket) => {
-  console.log('[KÖPRÜ] Arayüz bağlandı:', socket.id);
+  console.log('[KÖPRÜ] Arayüz bağlandı:', socket.id, '-', socket.data.user?.email || '?');
   socket.emit('connection-status', lastState.connection);
   if (lastState.data) socket.emit('resData', lastState.data);
   if (lastState.analogData) socket.emit('resAnalogData', lastState.analogData);
