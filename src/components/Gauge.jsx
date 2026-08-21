@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 // Yarım daire ibre göstergesi. Saf SVG — harici kütüphane gerekmez.
 //
@@ -38,6 +38,14 @@ function arcPath(angleStart, angleEnd, radius = R) {
   return `M ${p1.x} ${p1.y} A ${radius} ${radius} 0 0 1 ${p2.x} ${p2.y}`;
 }
 
+// Kayıtlı ayar eksik ya da bozuksa alanın fields.js'teki tanımı geçerlidir.
+function num(candidate, fallback) {
+  // Number(null) 0 döndürdüğü için boş değerler ayrıca elenir.
+  if (candidate === null || candidate === undefined || candidate === '') return fallback;
+  const parsed = Number(candidate);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function formatNum(v, decimals) {
   return v.toLocaleString('tr-TR', {
     minimumFractionDigits: decimals,
@@ -46,16 +54,108 @@ function formatNum(v, decimals) {
 }
 
 export default function Gauge({
+  fieldKey,
+  thresholds: storedThresholds,
+  onThresholdSave,
   label,
   value,
   unit,
-  min,
-  max,
+  min: fieldMin,
+  max: fieldMax,
   zones,
   decimals = 2,
   tickDecimals = 0,
   stale = false,
 }) {
+  const defaultWarning = zones.find((zone) => zone.level === 'normal')?.to ?? fieldMin;
+  const defaultCritical = zones.find((zone) => zone.level === 'warning')?.to ?? fieldMax;
+
+  // Gösterge ayarları (aralık + eşikler) veritabanından gelir; gelmeyen ya da
+  // sayıya çevrilemeyen her alan fields.js'teki tanıma düşer.
+  const withDefaults = useCallback(
+    (stored) => ({
+      warning: num(stored?.warning, defaultWarning),
+      critical: num(stored?.critical, defaultCritical),
+      min: num(stored?.min, fieldMin),
+      max: num(stored?.max, fieldMax),
+    }),
+    [defaultWarning, defaultCritical, fieldMin, fieldMax]
+  );
+
+  const [settings, setSettings] = useState(() => withDefaults(storedThresholds));
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(settings);
+  const [formError, setFormError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // Aralık da düzenlenebildiği için çizim boyunca kayıtlı sınırlar kullanılır.
+  const { min, max } = settings;
+
+  useEffect(() => {
+    if (!storedThresholds) return;
+    const next = withDefaults(storedThresholds);
+    setSettings(next);
+    if (!editing) setDraft(next);
+  }, [storedThresholds, editing, withDefaults]);
+
+  useEffect(() => {
+    if (!editing) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setEditing(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [editing]);
+
+  const activeZones = useMemo(
+    () => [
+      { to: settings.warning, level: 'normal' },
+      { to: settings.critical, level: 'warning' },
+      { to: max, level: 'danger' },
+    ],
+    [settings, max]
+  );
+
+  const openEditor = () => {
+    setDraft(settings);
+    setFormError('');
+    setEditing(true);
+  };
+
+  const saveThresholds = async (event) => {
+    event.preventDefault();
+    const nextMin = Number(draft.min);
+    const nextMax = Number(draft.max);
+    const warning = Number(draft.warning);
+    const critical = Number(draft.critical);
+    if (
+      !Number.isFinite(nextMin) || !Number.isFinite(nextMax) ||
+      !Number.isFinite(warning) || !Number.isFinite(critical)
+    ) {
+      setFormError('Tüm değerler sayı olmalıdır.');
+      return;
+    }
+    if (nextMin >= nextMax) {
+      setFormError('Minimum değer maksimum değerden küçük olmalıdır.');
+      return;
+    }
+    if (warning <= nextMin || warning >= critical || critical > nextMax) {
+      setFormError(`Değerler ${nextMin} < uyarı < kritik ≤ ${nextMax} sırasına uymalıdır.`);
+      return;
+    }
+    const next = { warning, critical, min: nextMin, max: nextMax };
+    try {
+      setSaving(true);
+      await onThresholdSave?.(fieldKey, next);
+      setSettings(next);
+      setEditing(false);
+    } catch (error) {
+      setFormError(error.message || 'Eşikler kaydedilemedi.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Değer yoksa (alan pakette gelmiyorsa ya da araçtan veri akmıyorsa) ibre
   // min'de durur; metin "—" veya "Veri Yok" olur.
   const hasValue = !stale && typeof value === 'number' && !Number.isNaN(value);
@@ -69,8 +169,8 @@ export default function Gauge({
 
   const zoneArcs = useMemo(() => {
     let from = min;
-    const last = zones.length - 1;
-    return zones
+    const last = activeZones.length - 1;
+    return activeZones
       .map((z, i) => {
         const a1 = valueToAngle(from, min, max);
         const a2 = valueToAngle(z.to, min, max) - (i === last ? 0 : OVERLAP);
@@ -78,14 +178,14 @@ export default function Gauge({
         return a1 > a2 ? { key: i, level: z.level, path: arcPath(a1, a2) } : null;
       })
       .filter(Boolean);
-  }, [zones, min, max]);
+  }, [activeZones, min, max]);
 
   // Yayın dış uçları: düz kesim yerine yuvarlak görünsün diye uçlara birer
   // daire konur (ilk/son bölgenin renginde).
   const capStart = polar(180);
   const capEnd = polar(0);
-  const firstLevel = zones[0]?.level ?? 'normal';
-  const lastLevel = zones[zones.length - 1]?.level ?? 'normal';
+  const firstLevel = activeZones[0]?.level ?? 'normal';
+  const lastLevel = activeZones[activeZones.length - 1]?.level ?? 'normal';
 
   const valueText = hasValue ? formatNum(value, decimals) : stale ? 'Veri Yok' : '—';
 
@@ -104,6 +204,18 @@ export default function Gauge({
       <span className="gauge-label" title={label}>
         {label.toLocaleUpperCase('tr-TR')}
       </span>
+      <button
+        type="button"
+        className="gauge-edit"
+        aria-label={`${label} gösterge aralığını ve eşik değerlerini düzenle`}
+        title="Gösterge aralığını ve eşik değerlerini düzenle"
+        onClick={openEditor}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m4 16-.7 4.7L8 20l10.6-10.6-4-4L4 16Z" />
+          <path d="m13.7 6.3 4 4" />
+        </svg>
+      </button>
 
       <svg
         viewBox={`0 0 ${W} ${H}`}
@@ -167,6 +279,80 @@ export default function Gauge({
           {unit && hasValue ? <tspan className="gauge-value-unit"> {unit}</tspan> : null}
         </text>
       </svg>
+
+      {editing && (
+        <div className="gauge-modal-backdrop" onMouseDown={() => setEditing(false)}>
+          <form
+            className="gauge-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`gauge-modal-${fieldKey || label}`}
+            onSubmit={saveThresholds}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="gauge-modal-head">
+              <div>
+                <h3 id={`gauge-modal-${fieldKey || label}`}>{label}</h3>
+                <p>Gösterge aralığını ve renk geçişlerini güncelleyin.</p>
+              </div>
+              <button type="button" className="gauge-modal-close" onClick={() => setEditing(false)} aria-label="Kapat">×</button>
+            </div>
+            <div className="gauge-threshold-row">
+              <label className="gauge-threshold-field">
+                <span>Minimum {unit && `(${unit})`}</span>
+                <input
+                  type="number"
+                  step="any"
+                  value={draft.min}
+                  autoFocus
+                  onChange={(event) => setDraft((old) => ({ ...old, min: event.target.value }))}
+                />
+              </label>
+              <label className="gauge-threshold-field">
+                <span>Maksimum {unit && `(${unit})`}</span>
+                <input
+                  type="number"
+                  step="any"
+                  value={draft.max}
+                  onChange={(event) => setDraft((old) => ({ ...old, max: event.target.value }))}
+                />
+              </label>
+            </div>
+            <div className="gauge-threshold-row">
+              <label className="gauge-threshold-field">
+                <span>Uyarı değeri {unit && `(${unit})`}</span>
+                <input
+                  type="number"
+                  min={draft.min}
+                  max={draft.max}
+                  step="any"
+                  value={draft.warning}
+                  onChange={(event) => setDraft((old) => ({ ...old, warning: event.target.value }))}
+                />
+              </label>
+              <label className="gauge-threshold-field">
+                <span>Kritik değer {unit && `(${unit})`}</span>
+                <input
+                  type="number"
+                  min={draft.min}
+                  max={draft.max}
+                  step="any"
+                  value={draft.critical}
+                  onChange={(event) => setDraft((old) => ({ ...old, critical: event.target.value }))}
+                />
+              </label>
+            </div>
+            <p className="gauge-threshold-range">
+              Fabrika aralığı: {formatNum(fieldMin, tickDecimals)} – {formatNum(fieldMax, tickDecimals)} {unit}
+            </p>
+            {formError && <p className="gauge-threshold-error" role="alert">{formError}</p>}
+            <div className="gauge-modal-actions">
+              <button type="button" className="gauge-cancel-btn" onClick={() => setEditing(false)} disabled={saving}>İptal</button>
+              <button type="submit" className="gauge-save-btn" disabled={saving}>{saving ? 'Kaydediliyor…' : 'Kaydet'}</button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

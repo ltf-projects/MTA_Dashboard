@@ -817,6 +817,7 @@ body {
 }
 
 .gauge-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -837,6 +838,8 @@ body {
 
 .gauge-label {
   max-width: 100%;
+  padding: 0 32px;
+  box-sizing: border-box;
   font-size: 13.5px;
   font-weight: 600;
   color: var(--text-dim);
@@ -1971,6 +1974,136 @@ body {
   color: var(--text-faint);
 }
 
+.report-alert-table-wrap {
+  overflow-x: auto;
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.report-alert-table {
+  width: 100%;
+  min-width: 660px;
+  border-collapse: collapse;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.report-alert-table th,
+.report-alert-table td {
+  padding: 11px 13px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.report-alert-table th {
+  color: var(--text-faint);
+  background: var(--surface);
+  font-size: 11.5px;
+  font-weight: 750;
+  letter-spacing: 0.35px;
+  text-transform: uppercase;
+}
+
+.report-alert-table tbody tr {
+  background: rgba(var(--off-rgb), 0.05);
+}
+
+.report-alert-table tbody tr:hover {
+  background: rgba(var(--off-rgb), 0.1);
+}
+
+.report-alert-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.report-alert-table td:first-child {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.report-alert-table td:first-child {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.report-alert-table time {
+  font-variant-numeric: tabular-nums;
+}
+
+.report-alert-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--zone-danger);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(var(--zone-danger-rgb), 0.55);
+}
+
+/* Eşik ve ulaşılan değer sütunları: sağa yaslı ve eşit genişlikli rakamlarla
+   yazılır ki iki sayı alt alta karşılaştırılabilsin. */
+.report-alert-table .report-alert-num,
+.report-alert-table .report-alert-threshold,
+.report-alert-table .report-alert-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Eşik, aşılan sınırı hatırlatan sessiz referans; vurgu ulaşılan değerde. */
+.report-alert-threshold {
+  color: var(--text-faint);
+}
+
+.report-alert-value {
+  color: var(--zone-danger);
+  font-weight: 750;
+}
+
+.report-alert-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 12px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
+.report-alert-pagination > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.report-alert-pagination button {
+  min-height: 34px;
+  padding: 0 12px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.report-alert-pagination button:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--border-strong);
+}
+
+.report-alert-pagination button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 560px) {
+  .report-alert-pagination {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .report-series-picker {
   margin: 0 0 14px;
   padding: 0;
@@ -2031,6 +2164,207 @@ body {
   --report-tone-rgb: 167, 139, 250;
 }
 
+.gauge-edit {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--text-faint);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.gauge-edit:hover {
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.5);
+  background: var(--accent-soft);
+}
+
+.gauge-edit svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.gauge-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(3, 8, 15, 0.76);
+  backdrop-filter: blur(7px);
+}
+
+.gauge-modal {
+  width: min(100%, 430px);
+  padding: 22px;
+  color: var(--text);
+  /* Koyu temadaki kart değişkenleri bilinçli olarak yarı saydamdır; popup'ta
+     aynı değer kullanılırsa arkadaki göstergeler formun içine taşar. */
+  background: rgba(31, 39, 49, 0.98);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  box-shadow: var(--shadow-panel);
+}
+
+:root[data-theme='light'] .gauge-modal {
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.gauge-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+.gauge-modal-head h3,
+.gauge-modal-head p {
+  margin: 0;
+}
+
+.gauge-modal-head h3 {
+  font-size: 18px;
+}
+
+.gauge-modal-head p,
+.gauge-threshold-range {
+  margin-top: 5px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
+.gauge-modal-close {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--text-dim);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.gauge-modal-close:hover {
+  color: var(--text);
+  background: var(--neutral-soft);
+}
+
+/* Min/maks ve uyarı/kritik ikilileri yan yana durur; dar ekranda alt alta
+   iner, böylece dört alan popup'ı uzatmaz. */
+.gauge-threshold-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.gauge-threshold-field {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.gauge-threshold-field input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+
+.gauge-threshold-field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.gauge-threshold-error {
+  margin: 12px 0 0;
+  color: var(--off);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.gauge-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 22px;
+}
+
+.gauge-modal-actions button {
+  min-height: 38px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.gauge-cancel-btn {
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.gauge-save-btn {
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+@media (max-width: 520px) {
+  .gauge-modal-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .gauge-threshold-row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+.report-card--violet {
+  --report-tone: #8b5cf6;
+  --report-tone-rgb: 139, 92, 246;
+}
+
+.report-card--cyan {
+  --report-tone: #22d3ee;
+  --report-tone-rgb: 34, 211, 238;
+}
+
+.report-card--rose {
+  --report-tone: #fb7185;
+  --report-tone-rgb: 251, 113, 133;
+}
+
 .report-card-icon {
   display: flex;
   align-items: center;
@@ -2079,12 +2413,6 @@ body {
   color: var(--text-faint);
 }
 
-/* Kayıt eksikse: değer yanıltıcı okunmasın diye kartın altında uyarı. */
-.report-card-warn {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--zone-warning);
-}
 
 /* ---------- Veri akışı durduğunda (15 sn) ---------- */
 .view-sub--stale {

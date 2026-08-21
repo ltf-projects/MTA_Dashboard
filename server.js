@@ -72,6 +72,7 @@ const brokerUrl = `${protocol}://${MQTT_HOST}:${MQTT_PORT}`;
 // --- Express + Socket.IO ---
 const app = express();
 app.use(cors({ origin: allowedOrigins }));
+app.use(express.json({ limit: '32kb' }));
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, { cors: { origin: allowedOrigins } });
 
@@ -183,7 +184,11 @@ const lastState = {
 const historySampleMs = Math.max(Number(HISTORY_SAMPLE_MS) || 5000, 250);
 
 const TABLE = 'sondaj_ornekleri';
+const THRESHOLD_TABLE = 'gosterge_esikleri';
 const FIELD_KEYS = [...new Set(FIELDS.filter((f) => f.key).map((f) => f.key))];
+const GAUGE_FIELDS = FIELDS.filter((f) => f.kind === 'gauge' && f.key);
+const GAUGE_BY_KEY = new Map(GAUGE_FIELDS.map((f) => [f.key, f]));
+const thresholdCache = new Map();
 // Motorun ömür boyu çalışma saati: kümülatif sayaç, /report bunun farkını alır.
 const ENGINE_HOURS_KEY = 'CAN_Engine_Total_Hours_Of_Operation';
 // Motor devri: sıfır olan örnekler motorun durduğu anları işaretler.
@@ -196,6 +201,17 @@ const ENGINE_SPEED_KEY = 'CAN_Engine_Speed';
 const ROTATION_SPEED_KEY = 'AuxData1';
 const ROTATION_ACTIVE_RPM = 500;
 const ROTATION_RESTART_GAP_SEC = 5 * 60;
+// Manevranın hemen dışındaki sıfırdan büyük, çalışma eşiğinin altındaki
+// rotasyon değerleri (sahada çoğunlukla yaklaşık 20) hazırlık/toparlama
+// hareketidir. Örnekler arasındaki bir dakikadan büyük kayıt boşlukları süreye
+// eklenmez.
+const ROTATION_OPERATION_MIN_RPM = 0;
+// Wireline basıncı normal seyirde yaklaşık 0-120 BAR aralığında kalıyor.
+// 150 BAR ve üstüne çıkan, aralarında beş dakikadan fazla boşluk bulunan her
+// ayrı blok grafikteki bir Wireline tepesidir.
+const WIRELINE_PRESSURE_KEY = 'AnalogData7';
+const WIRELINE_PEAK_BAR = 150;
+const WIRELINE_PEAK_RESTART_GAP_SEC = 5 * 60;
 // Alan adları büyük/küçük harf karışık (AnalogData1); Postgres tırnaksız
 // tanımlayıcıları küçük harfe indirdiği için her yerde tırnaklanır.
 const q = (name) => `"${name.replace(/"/g, '""')}"`;
@@ -245,6 +261,67 @@ async function initDb() {
       );
     }
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ${THRESHOLD_TABLE} (
+        id BIGSERIAL PRIMARY KEY,
+        box_id INTEGER NOT NULL,
+        alan_anahtari TEXT NOT NULL,
+        uyari_degeri DOUBLE PRECISION NOT NULL,
+        kritik_degeri DOUBLE PRECISION NOT NULL,
+        gecerli_baslangic TIMESTAMPTZ NOT NULL DEFAULT now(),
+        gecerli_bitis TIMESTAMPTZ,
+        guncelleyen_kullanici TEXT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS gosterge_esikleri_aktif_idx
+        ON ${THRESHOLD_TABLE} (box_id, alan_anahtari)
+        WHERE gecerli_bitis IS NULL;
+      ALTER TABLE ${THRESHOLD_TABLE} ENABLE ROW LEVEL SECURITY;
+    `);
+    // Gösterge aralığı da düzenlenebilir olduğundan sınırlar eşiklerle aynı
+    // satırda tutulur. Sütunlar sonradan eklendi: eski satırlarda NULL kalır,
+    // aşağıdaki backfill onları fields.js'teki fabrika aralığına çeker.
+    await pool.query(`
+      ALTER TABLE ${THRESHOLD_TABLE} ADD COLUMN IF NOT EXISTS min_degeri DOUBLE PRECISION;
+      ALTER TABLE ${THRESHOLD_TABLE} ADD COLUMN IF NOT EXISTS max_degeri DOUBLE PRECISION;
+    `);
+
+    for (const field of GAUGE_FIELDS) {
+      const warning = field.zones.find((zone) => zone.level === 'normal')?.to ?? field.min;
+      const critical = field.zones.find((zone) => zone.level === 'warning')?.to ?? field.max;
+      await pool.query(
+        `INSERT INTO ${THRESHOLD_TABLE}
+           (box_id, alan_anahtari, uyari_degeri, kritik_degeri,
+            min_degeri, max_degeri, guncelleyen_kullanici)
+         VALUES ($1, $2, $3, $4, $5, $6, 'sistem-varsayilani')
+         ON CONFLICT (box_id, alan_anahtari) WHERE gecerli_bitis IS NULL
+         DO NOTHING`,
+        [boxId, field.key, warning, critical, field.min, field.max]
+      );
+      await pool.query(
+        `UPDATE ${THRESHOLD_TABLE}
+         SET min_degeri = COALESCE(min_degeri, $3),
+             max_degeri = COALESCE(max_degeri, $4)
+         WHERE box_id = $1 AND alan_anahtari = $2
+           AND (min_degeri IS NULL OR max_degeri IS NULL)`,
+        [boxId, field.key, field.min, field.max]
+      );
+    }
+    const activeThresholds = await pool.query(
+      `SELECT alan_anahtari, uyari_degeri, kritik_degeri, min_degeri, max_degeri
+       FROM ${THRESHOLD_TABLE}
+       WHERE box_id = $1 AND gecerli_bitis IS NULL`,
+      [boxId]
+    );
+    thresholdCache.clear();
+    for (const row of activeThresholds.rows) {
+      thresholdCache.set(row.alan_anahtari, {
+        warning: Number(row.uyari_degeri),
+        critical: Number(row.kritik_degeri),
+        min: Number(row.min_degeri),
+        max: Number(row.max_degeri),
+      });
+    }
+
     // Supabase public şemasındaki tabloları otomatik REST API üzerinden
     // yayınlar; RLS kapalıyken tablo anon anahtarını bilen herkese açık olur.
     // Politika tanımlamadan RLS açmak bu erişimi kapatır. Köprü etkilenmez:
@@ -268,6 +345,7 @@ const INSERT_SQL = `
   VALUES ($1, $2, ${FIELD_KEYS.map((_, i) => `$${i + 3}`).join(', ')})
   ON CONFLICT (box_id, zaman) DO NOTHING
 `;
+let sampleWriteQueue = Promise.resolve();
 
 function numberOrNull(v) {
   if (v === null || v === undefined || v === '' || typeof v === 'object') return null;
@@ -279,17 +357,18 @@ function recordSample(value, atMs) {
   if (!dbReady || atMs - lastSampleAt < historySampleMs) return;
   lastSampleAt = atMs;
 
-  const params = [new Date(atMs), boxId, ...FIELD_KEYS.map((k) => numberOrNull(value[k]))];
-  // Yazma beklenmez: MQTT akışı veritabanı gecikmesine takılmasın.
-  pool.query(INSERT_SQL, params).then(
-    () => {
+  const at = new Date(atMs);
+  const params = [at, boxId, ...FIELD_KEYS.map((k) => numberOrNull(value[k]))];
+  // MQTT dinleyicisi beklemez; yazmalar kendi kuyruğunda sıralı işlenir.
+  sampleWriteQueue = sampleWriteQueue.then(async () => {
+    try {
+      await pool.query(INSERT_SQL, params);
       lastWriteAt = atMs;
-    },
-    (e) => {
+    } catch (e) {
       dbError = e.message;
       console.error('[KÖPRÜ] Örnek yazılamadı:', e.message);
     }
-  );
+  });
 }
 
 // Barındırma sağlayıcısı çalışan sürümün commit'ini ortam değişkeniyle verir.
@@ -311,6 +390,103 @@ app.get('/health', (_req, res) =>
     },
   })
 );
+
+app.get('/gauge-thresholds', requireAuth, async (_req, res) => {
+  if (!dbReady) {
+    res.status(503).json({ error: 'Veritabanı henüz hazır değil.' });
+    return;
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT alan_anahtari, uyari_degeri, kritik_degeri,
+              min_degeri, max_degeri, gecerli_baslangic
+       FROM ${THRESHOLD_TABLE}
+       WHERE box_id = $1 AND gecerli_bitis IS NULL`,
+      [boxId]
+    );
+    res.json({
+      thresholds: Object.fromEntries(rows.map((row) => [row.alan_anahtari, {
+        warning: Number(row.uyari_degeri),
+        critical: Number(row.kritik_degeri),
+        // Sınır kaydedilmemişse null gider; istemci fields.js aralığını kullanır.
+        min: row.min_degeri === null ? null : Number(row.min_degeri),
+        max: row.max_degeri === null ? null : Number(row.max_degeri),
+        validFrom: row.gecerli_baslangic.toISOString(),
+      }])),
+    });
+  } catch (e) {
+    res.status(500).json({ error: `Gösterge eşikleri okunamadı: ${e.message}` });
+  }
+});
+
+app.put('/gauge-thresholds/:key', requireAuth, async (req, res) => {
+  if (!dbReady || !pool) {
+    res.status(503).json({ error: 'Veritabanı henüz hazır değil.' });
+    return;
+  }
+  const field = GAUGE_BY_KEY.get(req.params.key);
+  if (!field) {
+    res.status(404).json({ error: 'Gösterge bulunamadı.' });
+    return;
+  }
+  const warning = Number(req.body?.warning);
+  const critical = Number(req.body?.critical);
+  // Aralık gönderilmezse göstergenin kayıtlı sınırları, o da yoksa fields.js
+  // tanımı geçerli kalır — eski istemciler yalnızca eşik gönderiyordu.
+  const stored = thresholdCache.get(field.key);
+  const min = req.body?.min === undefined ? (stored?.min ?? field.min) : Number(req.body.min);
+  const max = req.body?.max === undefined ? (stored?.max ?? field.max) : Number(req.body.max);
+
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) {
+    res.status(400).json({ error: 'Minimum değer maksimum değerden küçük olmalıdır.' });
+    return;
+  }
+  if (
+    !Number.isFinite(warning) || !Number.isFinite(critical) ||
+    warning <= min || warning >= critical || critical > max
+  ) {
+    res.status(400).json({
+      error: `Değerler ${min} < uyarı < kritik ≤ ${max} sırasına uymalıdır.`,
+    });
+    return;
+  }
+
+  const changedAt = new Date();
+  const changedBy = req.user?.email || req.user?.id || 'bilinmeyen-kullanici';
+  let dbClient;
+  try {
+    dbClient = await pool.connect();
+    await dbClient.query('BEGIN');
+    await dbClient.query(
+      `UPDATE ${THRESHOLD_TABLE}
+       SET gecerli_bitis = $3
+       WHERE box_id = $1 AND alan_anahtari = $2 AND gecerli_bitis IS NULL`,
+      [boxId, field.key, changedAt]
+    );
+    await dbClient.query(
+      `INSERT INTO ${THRESHOLD_TABLE}
+         (box_id, alan_anahtari, uyari_degeri, kritik_degeri, min_degeri, max_degeri,
+          gecerli_baslangic, guncelleyen_kullanici)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [boxId, field.key, warning, critical, min, max, changedAt, changedBy]
+    );
+    await dbClient.query('COMMIT');
+    thresholdCache.set(field.key, { warning, critical, min, max });
+    res.json({
+      key: field.key,
+      warning,
+      critical,
+      min,
+      max,
+      validFrom: changedAt.toISOString(),
+    });
+  } catch (e) {
+    await dbClient?.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ error: `Gösterge eşikleri kaydedilemedi: ${e.message}` });
+  } finally {
+    dbClient?.release();
+  }
+});
 
 // GET /history?from=<ISO>&to=<ISO>&keys=a,b&points=1200
 //
@@ -434,6 +610,114 @@ app.get('/history', requireAuth, async (req, res) => {
 const REPORT_EDGE_TOLERANCE_SEC = 60;
 const REPORT_GAP_SEC = 60;
 
+// GET /report-alerts?from=<ISO>&to=<ISO>
+//
+// Kritik olaylar saklanmaz, üstteki tarih aralığı için her istekte ham
+// örneklerden hesaplanır. Tek kaynak olduğu için raporun iki kez farklı sonuç
+// vermesi mümkün değildir ve eşik değiştirildiğinde geçmiş de anında yeni eşiğe
+// göre okunur.
+//
+// Bir gösterge kritik eşiğe çıktığında olay başlar; o göstergenin bir sonraki
+// kritik örneği REPORT_GAP_SEC'ten geç geliyorsa olay orada kapanır. Yani
+// eşiğin altına inip saniyeler içinde geri çıkan bir değer tek bir olay sayılır
+// (aynı olayın onlarca satıra bölünmesi engellenir), uzun sessizlikten sonraki
+// çıkış ise yeni olaydır. Her olay için ulaşılan en yüksek değer ve zamanı
+// döndürülür.
+//
+// Hız: pencere fonksiyonları yalnızca kritik örnekler üzerinde çalışsın diye
+// eşik karşılaştırması iki yerde birden yapılır. Dıştaki OR filtresi hiçbir
+// göstergesi kritik olmayan satırları daha örnek tablosu okunurken eler; geriye
+// kalan avuç dolusu satır LATERAL ile göstergelere açılır. Böylece maliyet
+// aralıktaki toplam örnek sayısıyla değil, kritik örnek sayısıyla büyür.
+app.get('/report-alerts', requireAuth, async (req, res) => {
+  const range = readRange(req, res);
+  if (!range) return;
+  const { fromMs, toMs } = range;
+
+  const selected = GAUGE_FIELDS.flatMap((field) => {
+    const threshold = thresholdCache.get(field.key)?.critical;
+    if (!Number.isFinite(threshold)) return [];
+    return [{ ...field, threshold }];
+  });
+  if (selected.length === 0) {
+    // Eşiksiz "uyarı yok" cevabı yanıltıcı olur; sebebi açıkça söylenir.
+    res.status(503).json({ error: 'Gösterge eşikleri yüklenmedi; tarama yapılamadı.' });
+    return;
+  }
+
+  const params = [boxId, new Date(fromMs), new Date(toMs), REPORT_GAP_SEC];
+  const columns = [];
+  const filters = [];
+  for (const field of selected) {
+    params.push(field.threshold);
+    const thresholdParam = `$${params.length}`;
+    const divisor = Number(field.divisor) || 1;
+    const valueSql = `o.${q(field.key)} / ${divisor}`;
+    columns.push(`('${field.key.replace(/'/g, "''")}', ${valueSql}, ${thresholdParam}::double precision)`);
+    filters.push(`${valueSql} >= ${thresholdParam}`);
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `
+      WITH tehlikeli AS (
+        SELECT o.zaman, v.alan, v.deger, v.esik
+        FROM ${TABLE} o
+        CROSS JOIN LATERAL (VALUES
+          ${columns.join(',\n          ')}
+        ) AS v(alan, deger, esik)
+        WHERE o.box_id = $1 AND o.zaman >= $2 AND o.zaman <= $3
+          AND (${filters.join('\n            OR ')})
+          AND v.deger >= v.esik
+      ),
+      komsulu AS (
+        SELECT *, lag(zaman) OVER (PARTITION BY alan ORDER BY zaman) AS onceki_zaman
+        FROM tehlikeli
+      ),
+      isaretli AS (
+        SELECT *,
+               CASE WHEN onceki_zaman IS NULL
+                      OR EXTRACT(EPOCH FROM (zaman - onceki_zaman)) > $4
+                    THEN 1 ELSE 0 END AS yeni_olay
+        FROM komsulu
+      ),
+      gruplu AS (
+        SELECT *, sum(yeni_olay) OVER (PARTITION BY alan ORDER BY zaman) AS olay_no
+        FROM isaretli
+      ),
+      olaylar AS (
+        SELECT alan,
+               max(deger) AS maksimum,
+               (array_agg(zaman ORDER BY deger DESC, zaman ASC))[1] AS maksimum_zamani,
+               max(esik) AS esik
+        FROM gruplu
+        GROUP BY alan, olay_no
+      )
+      SELECT alan, maksimum_zamani, maksimum, esik
+      FROM olaylar
+      ORDER BY maksimum_zamani DESC
+      LIMIT 1001
+      `,
+      params
+    );
+    const truncated = rows.length > 1000;
+    res.json({
+      truncated,
+      alerts: rows.slice(0, 1000).map((row) => ({
+        key: row.alan,
+        t: row.maksimum_zamani.toISOString(),
+        value: Number(row.maksimum),
+        // Olayın hangi sınırı aştığı tabloda ayrı sütunda gösterilir.
+        threshold: Number(row.esik),
+      })),
+    });
+  } catch (e) {
+    dbError = e.message;
+    console.error('[KÖPRÜ] Kritik uyarı hesaplama hatası:', e.message);
+    res.status(500).json({ error: `Kritik uyarılar hesaplanamadı: ${e.message}` });
+  }
+});
+
 app.get('/report', requireAuth, async (req, res) => {
   const range = readRange(req, res);
   if (!range) return;
@@ -446,13 +730,15 @@ app.get('/report', requireAuth, async (req, res) => {
         SELECT zaman,
                ${q(ENGINE_HOURS_KEY)} AS motor_saat,
                ${q(ENGINE_SPEED_KEY)} AS devir,
-               ${q(ROTATION_SPEED_KEY)} AS rotasyon
+               ${q(ROTATION_SPEED_KEY)} AS rotasyon,
+               ${q(WIRELINE_PRESSURE_KEY)} AS wireline
         FROM ${TABLE}
         WHERE box_id = $1 AND zaman >= $2 AND zaman <= $3
       ),
       adim AS (
         SELECT *,
-               EXTRACT(EPOCH FROM (zaman - lag(zaman) OVER (ORDER BY zaman))) AS aralik_sn
+               EXTRACT(EPOCH FROM (zaman - lag(zaman) OVER (ORDER BY zaman))) AS aralik_sn,
+               EXTRACT(EPOCH FROM (lead(zaman) OVER (ORDER BY zaman) - zaman)) AS sonraki_aralik_sn
         FROM veri
       ),
       aktif_rotasyon AS (
@@ -479,6 +765,66 @@ app.get('/report', requireAuth, async (req, res) => {
         SELECT manevra_no, min(zaman) AS baslangic, max(zaman) AS bitis
         FROM rotasyon_gruplu
         GROUP BY manevra_no
+      ),
+      aktif_wireline AS (
+        SELECT zaman,
+               lag(zaman) OVER (ORDER BY zaman) AS onceki_tepe_zamani
+        FROM veri
+        WHERE wireline >= $8
+      ),
+      wireline_isaretli AS (
+        SELECT zaman,
+               CASE
+                 WHEN onceki_tepe_zamani IS NULL
+                   OR EXTRACT(EPOCH FROM (zaman - onceki_tepe_zamani)) > $9
+                 THEN 1 ELSE 0
+               END AS yeni_tepe
+        FROM aktif_wireline
+      ),
+      wireline_ozet AS (
+        SELECT sum(yeni_tepe)::int AS tepe_adet
+        FROM wireline_isaretli
+      ),
+      rotasyon_komsulari AS (
+        SELECT *,
+               max(CASE WHEN rotasyon >= $5 THEN zaman END) OVER (
+                 ORDER BY zaman ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+               ) AS onceki_aktif_zaman,
+               -- Sonraki aktif zaman, "sonrasına bakan" bir çerçeve yerine ters
+               -- sıralı ve büyüyen bir çerçeveyle bulunur. İkisi de aynı satır
+               -- kümesini (zaman > bu satır) kapsar, ama min() tersinir olmadığı
+               -- için başlangıcı ilerleyen çerçeve her satırda baştan hesaplanır
+               -- (O(n²)); büyüyen çerçeve tek geçişte biter.
+               min(CASE WHEN rotasyon >= $5 THEN zaman END) OVER (
+                 ORDER BY zaman DESC ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+               ) AS sonraki_aktif_zaman
+        FROM adim
+      ),
+      operasyon_sureleri AS (
+        SELECT
+          coalesce(sum(sonraki_aralik_sn) FILTER (
+            WHERE rotasyon > $7 AND rotasyon < $5
+              AND sonraki_aralik_sn <= $4
+              AND sonraki_aktif_zaman IS NOT NULL
+              AND (
+                onceki_aktif_zaman IS NULL
+                OR EXTRACT(EPOCH FROM (sonraki_aktif_zaman - onceki_aktif_zaman)) > $6
+                   AND EXTRACT(EPOCH FROM (sonraki_aktif_zaman - zaman))
+                       < EXTRACT(EPOCH FROM (zaman - onceki_aktif_zaman))
+              )
+          ), 0) AS oncesi_saniye,
+          coalesce(sum(sonraki_aralik_sn) FILTER (
+            WHERE rotasyon > $7 AND rotasyon < $5
+              AND sonraki_aralik_sn <= $4
+              AND onceki_aktif_zaman IS NOT NULL
+              AND (
+                sonraki_aktif_zaman IS NULL
+                OR EXTRACT(EPOCH FROM (sonraki_aktif_zaman - onceki_aktif_zaman)) > $6
+                   AND EXTRACT(EPOCH FROM (zaman - onceki_aktif_zaman))
+                       <= EXTRACT(EPOCH FROM (sonraki_aktif_zaman - zaman))
+              )
+          ), 0) AS sonrasi_saniye
+        FROM rotasyon_komsulari
       )
       SELECT
         count(*)::int AS adet,
@@ -489,8 +835,11 @@ app.get('/report', requireAuth, async (req, res) => {
         count(*) FILTER (WHERE aralik_sn > $4)::int AS bosluk_adet,
         coalesce(sum(aralik_sn) FILTER (WHERE aralik_sn > $4), 0) AS bosluk_sn,
         (SELECT count(*)::int FROM rotasyon_ozet) AS manevra_adet,
+        (SELECT coalesce(tepe_adet, 0) FROM wireline_ozet) AS wireline_tepe_adet,
         (SELECT coalesce(sum(EXTRACT(EPOCH FROM (bitis - baslangic))), 0)
          FROM rotasyon_ozet) AS verimli_saniye,
+        (SELECT oncesi_saniye FROM operasyon_sureleri) AS operasyon_oncesi_saniye,
+        (SELECT sonrasi_saniye FROM operasyon_sureleri) AS operasyon_sonrasi_saniye,
         (SELECT motor_saat FROM veri WHERE motor_saat IS NOT NULL ORDER BY zaman ASC LIMIT 1) AS ilk_saat,
         (SELECT motor_saat FROM veri WHERE motor_saat IS NOT NULL ORDER BY zaman DESC LIMIT 1) AS son_saat
       FROM adim
@@ -502,6 +851,9 @@ app.get('/report', requireAuth, async (req, res) => {
         REPORT_GAP_SEC,
         ROTATION_ACTIVE_RPM,
         ROTATION_RESTART_GAP_SEC,
+        ROTATION_OPERATION_MIN_RPM,
+        WIRELINE_PEAK_BAR,
+        WIRELINE_PEAK_RESTART_GAP_SEC,
       ]
     );
 
@@ -514,6 +866,8 @@ app.get('/report', requireAuth, async (req, res) => {
     const lastAtMs = hasData ? r.son_zaman.getTime() : null;
     const gapSec = Number(r.bosluk_sn) || 0;
     const efficientSeconds = Number(r.verimli_saniye) || 0;
+    const beforeOperationSeconds = Number(r.operasyon_oncesi_saniye) || 0;
+    const afterOperationSeconds = Number(r.operasyon_sonrasi_saniye) || 0;
 
     // Kayıtların aralığı ne kadar kapladığı: uçlardaki eksikler ve aradaki
     // boşluklar düşülür.
@@ -559,6 +913,9 @@ app.get('/report', requireAuth, async (req, res) => {
       idleSamples: r.durus_adet,
       speedSamples: r.devirli_adet,
       maneuverCount: r.manevra_adet,
+      wirelinePeakCount: r.wireline_tepe_adet,
+      beforeOperationHours: beforeOperationSeconds / 3600,
+      afterOperationHours: afterOperationSeconds / 3600,
       efficientHours: efficientSeconds / 3600,
       lostHours: Math.max(0, (toMs - fromMs) / 3600000 - efficientSeconds / 3600),
     });

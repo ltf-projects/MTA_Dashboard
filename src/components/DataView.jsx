@@ -1,18 +1,27 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CATEGORIES, ZONE_LEGEND, fieldsOf } from '../config/fields.js';
+import { BRIDGE_URL } from '../socket.js';
+import { bridgeFetch } from '../lib/api.js';
 import Gauge from './Gauge.jsx';
 import StatCard from './StatCard.jsx';
 import DigitalCard from './DigitalCard.jsx';
 import HistoryView from './HistoryView.jsx';
 import ReportView from './ReportView.jsx';
+import OperationView from './OperationView.jsx';
 
 // Canlı kategorilerin yanındaki geçmiş sekmesi. Diğerleri gelen paketi
 // çizerken bu sekme köprüdeki /history ucundan kendi verisini çeker.
 const HISTORY_ID = 'gecmis';
 
-// Geçmiş sekmesinin yanındaki rapor sekmesi. İçeriği henüz yok; canlı pakete
-// de bağlı değil, o yüzden kendi bileşenini doğrudan çizer.
+// Geçmiş sekmesinin yanındaki rapor sekmeleri. Canlı pakete bağlı değiller,
+// verilerini kendileri köprüden çekerler; o yüzden kendi bileşenlerini
+// doğrudan çizerler.
 const REPORT_ID = 'rapor';
+const OPERATION_ID = 'operasyon';
+
+// Operasyon Raporu şimdilik gizli: sekme çubuğunda görünmez, ekranı da hazır
+// bekler. Yayına alınacağı zaman bu bayrağı true yapmak yeterlidir.
+const OPERATION_VISIBLE = false;
 
 // Arama için metni normalleştirir: Türkçe büyük/küçük harf kuralları (I→ı,
 // İ→i) uygulanır, ardından aksanlı harfler ASCII karşılığına indirgenir.
@@ -35,6 +44,53 @@ export default function DataView({
 }) {
   const [activeCategory, setActiveCategory] = useState(CATEGORIES[0].id);
   const [search, setSearch] = useState('');
+  const [gaugeThresholds, setGaugeThresholds] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadThresholds = async () => {
+      try {
+        const url = new URL('/gauge-thresholds', BRIDGE_URL);
+        const response = await bridgeFetch(url);
+        if (!response.ok) return;
+        const body = await response.json();
+        if (!cancelled) setGaugeThresholds(body.thresholds || {});
+      } catch {
+        // Köprü geçici olarak kapalıysa göstergeler varsayılan eşiklerle açılır.
+      }
+    };
+    loadThresholds();
+    return () => { cancelled = true; };
+  }, []);
+
+  const saveGaugeThreshold = useCallback(async (fieldKey, next) => {
+    const url = new URL(`/gauge-thresholds/${encodeURIComponent(fieldKey)}`, BRIDGE_URL);
+    const response = await bridgeFetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(next),
+    });
+    if (!response.ok) {
+      let message = `Sunucu ${response.status} döndü.`;
+      try {
+        const body = await response.json();
+        if (body?.error) message = body.error;
+      } catch {
+        // JSON olmayan yanıtta genel mesaj kullanılır.
+      }
+      throw new Error(message);
+    }
+    const saved = await response.json();
+    setGaugeThresholds((previous) => ({
+      ...previous,
+      [fieldKey]: {
+        warning: saved.warning,
+        critical: saved.critical,
+        min: saved.min,
+        max: saved.max,
+      },
+    }));
+  }, []);
 
   const value = packet?.value;
   const resAnalogData = analogPacket?.value;
@@ -48,11 +104,13 @@ export default function DataView({
     ...CATEGORIES,
     { id: HISTORY_ID, title: 'Geçmiş Grafik' },
     { id: REPORT_ID, title: 'Sondaj Makine Raporu' },
+    ...(OPERATION_VISIBLE ? [{ id: OPERATION_ID, title: 'Operasyon Raporu' }] : []),
   ];
   const isHistory = activeCategory === HISTORY_ID;
   const isReport = activeCategory === REPORT_ID;
+  const isOperation = OPERATION_VISIBLE && activeCategory === OPERATION_ID;
   // Canlı paketi çizen sekmeler: arama ve "veri bekleniyor" yalnızca bunlarda.
-  const isLive = !isHistory && !isReport;
+  const isLive = !isHistory && !isReport && !isOperation;
   const isMachine = activeCategory === 'makine';
   const livePacket = isMachine ? analogPacket : packet;
   const receivedAt = livePacket?.receivedAt;
@@ -178,6 +236,8 @@ export default function DataView({
         <HistoryView />
       ) : isReport ? (
         <ReportView />
+      ) : isOperation ? (
+        <OperationView />
       ) : !livePacket ? (
         <WaitingState topic={topic} boxId={boxId} />
       ) : isEmpty ? (
@@ -217,6 +277,9 @@ export default function DataView({
                   {section.items.map((f) => (
                     <Gauge
                       key={f.tr}
+                      fieldKey={f.key}
+                      thresholds={gaugeThresholds[f.key]}
+                      onThresholdSave={saveGaugeThreshold}
                       label={f.tr}
                       value={f.current}
                       unit={f.unit}
@@ -243,6 +306,9 @@ export default function DataView({
                       {section.gauges.map((f) => (
                         <Gauge
                           key={f.tr}
+                          fieldKey={f.key}
+                          thresholds={gaugeThresholds[f.key]}
+                          onThresholdSave={saveGaugeThreshold}
                           label={f.tr}
                           value={f.current}
                           unit={f.unit}

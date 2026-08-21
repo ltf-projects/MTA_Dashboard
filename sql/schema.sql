@@ -68,3 +68,28 @@ COMMENT ON TABLE public.sondaj_ornekleri IS
 -- atlar ve doğrudan Postgres bağlantısıyla yazmaya/okumaya devam eder.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.sondaj_ornekleri ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.gosterge_esikleri (
+  id BIGSERIAL PRIMARY KEY,
+  box_id INTEGER NOT NULL,
+  alan_anahtari TEXT NOT NULL,
+  uyari_degeri DOUBLE PRECISION NOT NULL,
+  kritik_degeri DOUBLE PRECISION NOT NULL,
+  -- Göstergenin alt/üst sınırı da arayüzden düzenlenir. Boşsa fields.js'teki
+  -- fabrika aralığı geçerlidir; köprü açılışta boş satırları doldurur.
+  min_degeri DOUBLE PRECISION,
+  max_degeri DOUBLE PRECISION,
+  gecerli_baslangic TIMESTAMPTZ NOT NULL DEFAULT now(),
+  gecerli_bitis TIMESTAMPTZ,
+  guncelleyen_kullanici TEXT
+);
+
+-- Tablo daha önce sınır sütunları olmadan kurulduysa:
+ALTER TABLE public.gosterge_esikleri ADD COLUMN IF NOT EXISTS min_degeri DOUBLE PRECISION;
+ALTER TABLE public.gosterge_esikleri ADD COLUMN IF NOT EXISTS max_degeri DOUBLE PRECISION;
+
+CREATE UNIQUE INDEX IF NOT EXISTS gosterge_esikleri_aktif_idx
+  ON public.gosterge_esikleri (box_id, alan_anahtari)
+  WHERE gecerli_bitis IS NULL;
+
+ALTER TABLE public.gosterge_esikleri ENABLE ROW LEVEL SECURITY;

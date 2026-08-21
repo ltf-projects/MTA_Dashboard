@@ -7,14 +7,18 @@ import RangePicker, {
   toLocalInput,
   validateRange,
 } from './RangePicker.jsx';
-import { ROTASYON_DEVIR_DIVISOR, ROTASYON_DEVIR_KEY } from '../config/fields.js';
+import { FIELDS, ROTASYON_DEVIR_DIVISOR, ROTASYON_DEVIR_KEY } from '../config/fields.js';
 
 // "Sondaj Makine Raporu" sekmesi. Üstte tarih aralığı seçimi, altında özet
 // kartları.
 //
 // "Toplam Çalışma Saati" köprüdeki /report ucundan gelir; hesabın iki yolu ve
-// hangisinin ne zaman seçildiği server.js'te anlatılır. Kayıt eksikse kartın
-// altında uyarı çıkar: eksik veri sessizce "makine durmuş" gibi okunmasın.
+// hangisinin ne zaman seçildiği server.js'te anlatılır.
+//
+// "Uyarılar" bölümündeki kritik olaylar saklanmaz; her raporda ham örneklerden
+// hesaplanır. Boş liste ile "sorun yok" karıştırılmaz: aralıkta hiç kayıt yoksa
+// ya da kayıt boşluğu varsa bunu ayrıca söyler — eksik veri sessizce "her şey
+// yolunda" gibi okunmasın.
 //
 // "Manevra Sayısı", makine verilerindeki Rotasyon Devir (AuxData1) serisinin
 // çalışma bandına çıktığı ayrı blokların sayısıdır. Her bloğun başlangıç ve
@@ -48,6 +52,25 @@ const ICONS = {
       <path d="M16 3v3.5c0 2-4 3.6-4 5.5s4 3.5 4 5.5V21" />
     </>
   ),
+  before: (
+    <>
+      <path d="M4 12h13M8 7l-5 5 5 5" />
+      <circle cx="18" cy="12" r="3" />
+    </>
+  ),
+  after: (
+    <>
+      <path d="M7 12h13M16 7l5 5-5 5" />
+      <circle cx="6" cy="12" r="3" />
+    </>
+  ),
+  winch: (
+    <>
+      <circle cx="12" cy="12" r="5" />
+      <circle cx="12" cy="12" r="1.5" />
+      <path d="M7 12H3m14 0h4M5 8v8m14-8v8M12 7V3" />
+    </>
+  ),
 };
 
 // Rapor grafiğinde alan seçici yoktur; bu iki seri her zaman birlikte çizilir.
@@ -69,6 +92,32 @@ const REPORT_SERIES = [
   },
 ];
 
+const GAUGE_FIELDS = FIELDS.filter((field) => field.kind === 'gauge' && field.key);
+const GAUGE_BY_KEY = new Map(GAUGE_FIELDS.map((field) => [field.key, field]));
+const ALERTS_PER_PAGE = 10;
+
+function formatAlertStamp(iso) {
+  return new Date(iso).toLocaleString('tr-TR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+// Uyarı tablosundaki sayılar: eşik ile ulaşılan değer aynı biçimde yazılır ki
+// sütunlar alt alta karşılaştırılabilsin.
+function formatAlertNumber(value, decimals, unit) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+  const text = value.toLocaleString('tr-TR', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return unit ? `${text} ${unit}` : text;
+}
+
 // Kartlarda "23 saat 59 dk" biçimi.
 function splitDuration(ms) {
   const total = Math.max(0, Math.round(ms / 60000));
@@ -81,6 +130,7 @@ export default function ReportView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
+  const [alertPage, setAlertPage] = useState(1);
   const [activeSeries, setActiveSeries] = useState(
     () => new Set(REPORT_SERIES.map((s) => s.key))
   );
@@ -104,13 +154,17 @@ export default function ReportView() {
       historyUrl.searchParams.set('from', fromIso);
       historyUrl.searchParams.set('to', toIso);
       historyUrl.searchParams.set('keys', REPORT_SERIES.map((s) => s.key).join(','));
+      const alertsUrl = new URL('/report-alerts', BRIDGE_URL);
+      alertsUrl.searchParams.set('from', fromIso);
+      alertsUrl.searchParams.set('to', toIso);
 
-      const [reportRes, historyRes] = await Promise.all([
+      const [reportRes, historyRes, alertsRes] = await Promise.all([
         bridgeFetch(reportUrl),
         bridgeFetch(historyUrl),
+        bridgeFetch(alertsUrl),
       ]);
 
-      for (const res of [reportRes, historyRes]) {
+      for (const res of [reportRes, historyRes, alertsRes]) {
         if (res.ok) continue;
         // Köprü sebebini yazıyorsa (veritabanı kapalı, bağlantı yok...) onu
         // olduğu gibi göster.
@@ -124,8 +178,13 @@ export default function ReportView() {
         throw new Error(msg);
       }
 
-      const [report, history] = await Promise.all([reportRes.json(), historyRes.json()]);
-      setResult({ ...report, history, fromMs, toMs });
+      const [report, history, alertResult] = await Promise.all([
+        reportRes.json(),
+        historyRes.json(),
+        alertsRes.json(),
+      ]);
+      setAlertPage(1);
+      setResult({ ...report, history, alertResult, fromMs, toMs });
     } catch (e) {
       setError(
         e instanceof TypeError
@@ -161,11 +220,22 @@ export default function ReportView() {
     typeof result?.lostHours === 'number'
       ? splitDuration(result.lostHours * 3600000)
       : null;
+  const beforeOperation =
+    typeof result?.beforeOperationHours === 'number'
+      ? splitDuration(result.beforeOperationHours * 3600000)
+      : null;
+  const afterOperation =
+    typeof result?.afterOperationHours === 'number'
+      ? splitDuration(result.afterOperationHours * 3600000)
+      : null;
   const usage =
     engineMs !== null && selectedMs > 0
       ? ((engineMs / selectedMs) * 100).toFixed(1)
       : null;
 
+  // Aralıkta hiç örnek yoksa uyarı listesi de boş gelir; bu "sorun yok" değil
+  // "bakılacak veri yok" demektir ve ayrıca söylenir.
+  const noData = Boolean(result) && !(result.sampleCount > 0);
   // Kapsam açığı yalnızca anlamlı olduğunda söylenir; uçlardaki birkaç
   // saniyelik fark her raporda uyarı çıkarmasın.
   const missing = result?.coverage ? Math.round((1 - result.coverage.ratio) * 100) : null;
@@ -173,6 +243,12 @@ export default function ReportView() {
     result && result.sampleCount > 0 && missing >= 2
       ? `Aralığın %${missing}'inde kayıt yok`
       : null;
+  const dangerAlerts = result?.alertResult?.alerts ?? [];
+  const alertPageCount = Math.max(1, Math.ceil(dangerAlerts.length / ALERTS_PER_PAGE));
+  const visibleAlerts = dangerAlerts.slice(
+    (alertPage - 1) * ALERTS_PER_PAGE,
+    alertPage * ALERTS_PER_PAGE
+  );
 
   const reportSeries = REPORT_SERIES.filter((s) => activeSeries.has(s.key));
   const chartKeysWithData = new Set(
@@ -229,7 +305,6 @@ export default function ReportView() {
                 ? 'Bu aralıkta kayıt yok'
                 : 'Hesaplanıyor…'
           }
-          warn={engine ? coverageWarn : null}
         />
         <ReportCard
           tone="blue"
@@ -253,6 +328,29 @@ export default function ReportView() {
           label="Manevra Sayısı"
           count={result?.maneuverCount}
           note="Rotasyon sayısı"
+        />
+        <ReportCard
+          tone="violet"
+          icon="winch"
+          label="İç Tüp Çekme Operasyonu"
+          count={result?.wirelinePeakCount}
+          note="150 BAR ve üzerindeki ayrı tepe sayısı"
+        />
+        <ReportCard
+          tone="cyan"
+          icon="before"
+          label="Operasyon Öncesi Süre"
+          hours={beforeOperation?.hours}
+          minutes={beforeOperation?.minutes}
+          note="Manevra öncesi düşük rotasyon süresi"
+        />
+        <ReportCard
+          tone="rose"
+          icon="after"
+          label="Operasyon Sonrası Süre"
+          hours={afterOperation?.hours}
+          minutes={afterOperation?.minutes}
+          note="Manevra sonrası düşük rotasyon süresi"
         />
       </div>
 
@@ -283,9 +381,70 @@ export default function ReportView() {
             <span className="report-warnings-icon" aria-hidden="true">!</span>
             <h3 id="report-warnings-title">Uyarılar</h3>
           </div>
-          {coverageWarn ? (
-            <p className="report-warning-item">{coverageWarn}</p>
-          ) : (
+          {noData && (
+            <p className="report-warning-item">
+              Seçilen aralıkta hiç kayıt yok; uyarı taraması yapılamadı.
+            </p>
+          )}
+          {coverageWarn && <p className="report-warning-item">{coverageWarn}</p>}
+          {dangerAlerts.length > 0 && (
+            <>
+              <div className="report-alert-table-wrap">
+                <table className="report-alert-table">
+                  <thead>
+                    <tr>
+                      <th>Gösterge</th>
+                      <th>Tarih ve Saat</th>
+                      <th className="report-alert-num">Kritik Eşik</th>
+                      <th className="report-alert-num">Ulaşılan Değer</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleAlerts.map((alert, index) => {
+                      const field = GAUGE_BY_KEY.get(alert.key);
+                      const decimals = field?.decimals ?? 2;
+                      return (
+                        <tr key={`${alert.key}-${alert.t}-${index}`}>
+                          <td><span className="report-alert-dot" aria-hidden="true" />{field?.tr ?? alert.key}</td>
+                          <td><time dateTime={alert.t}>{formatAlertStamp(alert.t)}</time></td>
+                          <td className="report-alert-threshold">
+                            {formatAlertNumber(alert.threshold, decimals, field?.unit)}
+                          </td>
+                          <td className="report-alert-value">
+                            {formatAlertNumber(alert.value, decimals, field?.unit)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="report-alert-pagination" aria-label="Uyarı sayfaları">
+                <span>{dangerAlerts.length} kritik olay</span>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setAlertPage((page) => Math.max(1, page - 1))}
+                    disabled={alertPage === 1}
+                  >
+                    Önceki
+                  </button>
+                  <span>{alertPage} / {alertPageCount}</span>
+                  <button
+                    type="button"
+                    onClick={() => setAlertPage((page) => Math.min(alertPageCount, page + 1))}
+                    disabled={alertPage === alertPageCount}
+                  >
+                    Sonraki
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+          {result.alertResult?.truncated && (
+            <p className="report-warning-item">İlk 1.000 kritik olay gösteriliyor.</p>
+          )}
+          {!noData && !coverageWarn && dangerAlerts.length === 0 && (
             <p className="report-warnings-empty">Seçilen tarih aralığında uyarı bulunmuyor.</p>
           )}
         </section>
@@ -323,7 +482,7 @@ function ReportSeriesPicker({ active, withData, onToggle }) {
   );
 }
 
-function ReportCard({ tone, icon, label, hours, minutes, count, note, warn = null }) {
+function ReportCard({ tone, icon, label, hours, minutes, count, note }) {
   const hasCount = typeof count === 'number';
   const hasDuration = typeof hours === 'number' && typeof minutes === 'number';
 
@@ -353,7 +512,6 @@ function ReportCard({ tone, icon, label, hours, minutes, count, note, warn = nul
         )}
       </span>
       <span className="report-card-note">{note}</span>
-      {warn && <span className="report-card-warn">{warn}</span>}
     </div>
   );
 }
