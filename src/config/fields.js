@@ -66,8 +66,8 @@ const MACHINE_FIELDS = [
   },
   // Eşikler henüz teyit edilmedi; diğer göstergelerle aynı orana göre kondu.
   { key: 'AnalogData12', tr: 'Su Litre', unit: 'Litre', min: 0, max: 150, zones: zones(110, 130, 150) },
-  { key: 'AnalogData9', tr: 'Wireline Vinç', min: 0, max: 320, zones: zones(230, 242, 320) },
-  { key: 'AnalogData10', tr: 'Çamur Su Basıncı', unit: 'BAR', min: 0, max: 320, zones: zones(225, 250, 320) },
+  { key: 'AnalogData9', tr: 'Mosfet Yağlama', min: 0, max: 320, zones: zones(230, 242, 320) },
+  { key: 'AnalogData10', tr: 'Su Basıncı', unit: 'BAR', min: 0, max: 320, zones: zones(225, 250, 320) },
   { key: 'AnalogData11', tr: 'Rotasyon İlerleme', min: 0, max: 350, zones: zones(330, 342, 350) },
   { key: 'AnalogData13', tr: 'Makine Roll', min: -90, max: 90, zones: zones(55, 70, 90) },
   { key: 'AnalogData14', tr: 'Makine Pitch', min: -90, max: 90, zones: zones(55, 70, 90) },
